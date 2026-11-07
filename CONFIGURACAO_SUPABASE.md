@@ -39,9 +39,11 @@ Salve e faça um novo deploy da versão do CAEMGAMO. O endpoint `/config.json` p
 
 Com Docker e Supabase CLI instalados, execute `supabase start` e depois `supabase test db`. Os testes em `supabase/tests/` verificam perfis, envio de mensagens e presentes, limite anti-spam, bloqueio de mute/ban, expiração, cargos e denúncias. Para testar envio de e-mail, é necessário configurar SMTP e usar uma conta de teste.
 
-## Limites conhecidos
+## Proteções e limites conhecidos
 
 - Áudio ao vivo, câmera e transmissão continuam usando WebRTC ponto a ponto. O servidor de mídia não é um SFU; várias câmeras em uma sala com 15 pessoas podem exigir muita banda e processamento. TURN melhora conectividade quando configurado.
-- Clipes de áudio têm limite de 30 segundos medido no navegador, tamanho máximo de 10 MB imposto pelo Storage e formatos de áudio permitidos. A duração é informada pelo cliente; validar duração a partir do arquivo contra um cliente modificado exige um serviço confiável de transcodificação/inspeção, que ainda não está configurado.
+- Áudios gravados ou enviados têm até 30 segundos medidos no navegador, limite de 10 MB imposto pelo Storage e tipos MIME permitidos. Um cliente modificado pode falsificar a duração; verificar o arquivo com confiabilidade exigiria processamento de mídia no servidor, que não está configurado.
+- O banco limita mensagens a cinco por pessoa a cada dez segundos, convites a 30 por hora, moderação a 30 ações por dez minutos e denúncias a dez por hora. O Supabase Auth também limita solicitações de recuperação e tentativas de validação; mantenha uma expiração curta para OTP e monitore erros 429 no painel.
+- Cargos personalizados têm permissões explícitas e hierarquia validada no banco; usuários não podem atribuir a si mesmos cargos iguais ou superiores. Denúncias e auditoria ficam visíveis apenas a quem tem a permissão correspondente. Presentes são apenas emojis gratuitos: não há moeda, cobrança nem transação simulada.
 - Os canais de texto persistentes são protegidos por RLS, mas retenção e exclusão administrativa de mensagens ainda não têm uma tela própria.
 - A hospedagem continua sujeita às políticas e limites do Render e do Supabase; este código não pode garantir disponibilidade perpétua.

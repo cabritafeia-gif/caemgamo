@@ -45,7 +45,7 @@ Para habilitar TURN no Coturn, configure `use-auth-secret` e `static-auth-secret
 - O processo envia heartbeats pelo WebSocket e renova a presença das salas no Redis.
 - O cliente tenta reconectar com espera progressiva; ao voltar, entra novamente na sala e renegocia a conexão.
 
-As cotas e limites de frequência são proteções básicas. Em produção, monitore tráfego e ajuste-os para o volume real. Chamadas e mensagens em salas diretas continuam sendo enviadas entre navegadores via WebRTC, sem histórico no servidor. Mensagens de canais Supabase ficam no Postgres e são entregues em tempo real; RLS limita leitura e envio. Figurinhas e clipes curtos de áudio são anexos dos canais de texto.
+As cotas e limites de frequência são proteções básicas. Em produção, monitore tráfego e ajuste-os para o volume real. Chamadas e mensagens em salas diretas continuam sendo enviadas entre navegadores via WebRTC, sem histórico no servidor. Mensagens de canais Supabase ficam no Postgres e são entregues em tempo real; RLS limita leitura e envio. Figurinhas, presentes virtuais sem pagamento e clipes gravados ou enviados (até 30 segundos e 10 MB) são anexos dos canais de texto. A duração de áudio é conferida pelo navegador e não por um transcodificador confiável no servidor.
 
 ## Hospedagem
 
