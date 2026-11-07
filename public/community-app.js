@@ -41,21 +41,52 @@
 
   function setAvatar(url, name) {
     const button = $('profile-button');
-    const rail = document.querySelector('.rail-user-avatar');
+    const rail = $('rail-profile-button');
     const initials = (name || 'C').trim().slice(0, 1).toUpperCase();
     for (const target of [button, rail, $('profile-initial')]) {
       if (!target) continue;
       target.textContent = initials;
       target.style.backgroundImage = '';
+      target.classList.remove('has-avatar');
+      target.dataset.avatarUrl = url || '';
       if (url && (target === button || target === rail)) {
-        target.style.backgroundImage = `url("${url.replaceAll('"', '')}")`;
-        target.classList.add('has-avatar');
-      } else target.classList.remove('has-avatar');
+        const probe = new Image();
+        probe.onload = () => {
+          if (target.dataset.avatarUrl !== url) return;
+          target.style.backgroundImage = `url("${url.replaceAll('"', '')}")`;
+          target.classList.add('has-avatar');
+        };
+        probe.onerror = () => {
+          if (target.dataset.avatarUrl !== url) return;
+          target.style.backgroundImage = '';
+          target.classList.remove('has-avatar');
+          target.textContent = initials;
+        };
+        probe.src = url;
+      }
     }
     const image = $('profile-image');
+    const initial = $('profile-initial');
     if (image) {
-      image.hidden = !url;
-      if (url) image.src = url;
+      image.dataset.avatarUrl = url || '';
+      image.hidden = true;
+      initial.hidden = false;
+      if (!url) { image.removeAttribute('src'); return; }
+      image.onload = () => {
+        if (image.dataset.avatarUrl !== url) return;
+        image.hidden = false;
+        initial.hidden = true;
+      };
+      image.onerror = () => {
+        if (image.dataset.avatarUrl !== url) return;
+        image.hidden = true;
+        initial.hidden = false;
+      };
+      image.src = url;
+      if (image.complete && image.naturalWidth > 0) {
+        image.hidden = false;
+        initial.hidden = true;
+      }
     }
   }
 
@@ -95,6 +126,8 @@
     const { data, error } = await state.client.from('profiles').select('id,display_name,avatar_path,preferred_theme').eq('id', state.session.user.id).maybeSingle();
     if (error) throw error;
     state.profile = data;
+    if (data?.id) state.profiles.set(data.id, { ...(state.profiles.get(data.id) || {}), ...data });
+    if (data?.id) window.CAEMGAMO_REFRESH_AUTHOR?.(data.id, data.display_name, avatarUrl(data.avatar_path));
     if (data?.preferred_theme) window.CAEMGAMO_APPLY_THEME?.(data.preferred_theme);
     updateAccountView();
   }
@@ -159,23 +192,51 @@
     if (reload) await loadChannels();
   }
 
+  function markSelectedChannel(channelId) {
+    document.querySelectorAll('.channel-row').forEach((button) => {
+      button.classList.toggle('selected', button.dataset.channelId === channelId);
+      if (button.dataset.channelId === channelId) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+  }
+
   async function loadChannels() {
     const container = $('channel-list');
     container.replaceChildren();
     if (!state.communityId) return;
     const { data, error } = await state.client.from('channels').select('id,name,kind').eq('community_id', state.communityId).order('created_at');
     if (error) throw error;
-    (data || []).forEach((channel) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'channel-row';
-      button.innerHTML = `<span aria-hidden="true">${channel.kind === 'voice' ? '♫' : '#'}</span>`;
-      const name = document.createElement('span');
-      name.textContent = channel.name;
-      button.append(name);
-      button.addEventListener('click', () => channel.kind === 'voice' ? joinVoiceChannel(channel) : selectTextChannel(channel));
-      container.append(button);
-    });
+    for (const group of [
+      { kind: 'text', title: 'TEXTO', icon: '#' },
+      { kind: 'voice', title: 'VOZ E TRANSMISSÃO', icon: '♫' }
+    ]) {
+      const channels = (data || []).filter((channel) => channel.kind === group.kind);
+      const section = document.createElement('section');
+      section.className = 'channel-group';
+      section.setAttribute('aria-label', `Canais de ${group.kind === 'text' ? 'texto' : 'voz e transmissão'}`);
+      const heading = document.createElement('div');
+      heading.className = 'channel-category';
+      heading.textContent = group.title;
+      section.append(heading);
+      for (const channel of channels) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'channel-row';
+        button.dataset.channelId = channel.id;
+        button.innerHTML = `<span aria-hidden="true">${group.icon}</span>`;
+        const name = document.createElement('span');
+        name.textContent = channel.name;
+        button.append(name);
+        button.addEventListener('click', () => {
+          markSelectedChannel(channel.id);
+          channel.kind === 'voice' ? joinVoiceChannel(channel) : selectTextChannel(channel);
+        });
+        section.append(button);
+      }
+      container.append(section);
+    }
+    const selected = state.channel?.id || requestedChannel;
+    if (selected) markSelectedChannel(selected);
     updateAccountView();
   }
 
@@ -219,6 +280,7 @@
     if (state.subscription) await state.client.removeChannel(state.subscription);
     state.subscription = null;
     state.channel = channel;
+    markSelectedChannel(channel.id);
     window.CaemgamoCommunity.activeTextChannel = channel.id;
     window.CaemgamoCommunity.canSend = true;
     $('chat-header').querySelector('h2').textContent = `# ${channel.name}`;
@@ -241,8 +303,18 @@
     window.CAEMGAMO_UPDATE_CHAT_STATE?.();
   }
 
+  async function refreshTextChannel() {
+    const channelId = window.CaemgamoCommunity.activeTextChannel;
+    if (!channelId || !state.session?.user) throw new Error('Escolha um canal de texto primeiro.');
+    const { data, error } = await state.client.from('channels').select('id,name,kind').eq('id', channelId).maybeSingle();
+    if (error) throw error;
+    if (!data || data.kind !== 'text') throw new Error('Este canal de texto não está disponível.');
+    await selectTextChannel(data);
+  }
+
   function joinVoiceChannel(channel) {
     if (!state.session?.user) { openAccount(); return; }
+    markSelectedChannel(channel.id);
     location.assign(`/?sala=${encodeURIComponent(channel.id)}&canal=${encodeURIComponent(channel.id)}`);
   }
 
@@ -691,10 +763,53 @@
   }
 
   function bindForms() {
-    $('profile-button').addEventListener('click', openAccount);
+    for (const id of ['profile-button', 'rail-profile-button', 'rail-settings-button']) $(id).addEventListener('click', openAccount);
     $('home-server-button').addEventListener('click', () => location.assign('/'));
     $('account-close').addEventListener('click', () => { $('account-dialog').hidden = true; });
     $('account-dialog').addEventListener('click', (event) => { if (event.target === $('account-dialog')) $('account-dialog').hidden = true; });
+    $('chat-menu').addEventListener('click', () => {
+      const menu = $('chat-menu-options');
+      menu.hidden = !menu.hidden;
+      $('chat-menu').setAttribute('aria-expanded', String(!menu.hidden));
+    });
+    $('refresh-chat-button').addEventListener('click', async () => {
+      $('chat-menu-options').hidden = true;
+      $('chat-menu').setAttribute('aria-expanded', 'false');
+      try { await refreshTextChannel(); }
+      catch (error) { window.CAEMGAMO_TOAST?.(friendlyError(error)); }
+    });
+    $('copy-chat-invite-button').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      $('chat-menu-options').hidden = true;
+      $('chat-menu').setAttribute('aria-expanded', 'false');
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(location.href);
+        else {
+          const field = document.createElement('textarea');
+          field.value = location.href;
+          field.style.position = 'fixed';
+          field.style.opacity = '0';
+          document.body.append(field);
+          field.select();
+          if (!document.execCommand('copy')) throw new Error('clipboard indisponível');
+          field.remove();
+        }
+        button.textContent = 'Copiado!';
+        setTimeout(() => { button.textContent = '↗ Copiar link desta sala'; }, 1500);
+      } catch { window.CAEMGAMO_TOAST?.('Não foi possível copiar o link. Use o botão Convidar da sala.'); }
+    });
+    document.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.chat-menu-wrap')) {
+        $('chat-menu-options').hidden = true;
+        $('chat-menu').setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        $('chat-menu-options').hidden = true;
+        $('chat-menu').setAttribute('aria-expanded', 'false');
+      }
+    });
     $('show-sign-up').addEventListener('click', () => showForm('sign-up-form'));
     $('show-sign-in').addEventListener('click', () => showForm('sign-in-form'));
     $('show-recovery').addEventListener('click', () => showForm('recovery-form'));
@@ -750,6 +865,7 @@
         const { error } = await state.client.from('profiles').update({ display_name, preferred_theme }).eq('id', state.session.user.id);
         if (error) throw error;
         state.profile = { ...state.profile, display_name, preferred_theme };
+        state.profiles.set(state.session.user.id, { ...(state.profiles.get(state.session.user.id) || {}), ...state.profile });
         window.CAEMGAMO_APPLY_THEME?.(preferred_theme);
         setAvatar(avatarUrl(state.profile.avatar_path), display_name);
         status('Perfil salvo.');
@@ -763,11 +879,19 @@
     $('profile-reset-password').addEventListener('click', async () => {
       await requestRecoveryCode(state.session.user.email);
     });
-    $('sign-out-button').addEventListener('click', async () => {
-      const { error } = await state.client.auth.signOut();
-      if (error) { status(friendlyError(error), true); return; }
-      $('account-dialog').hidden = true;
-      if (requestedChannel) location.reload();
+    $('sign-out-button').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const { error } = await state.client.auth.signOut({ scope: 'local' });
+        if (error) throw error;
+        state.session = null;
+        await settleAuth();
+        $('account-dialog').hidden = true;
+        status('Você saiu da conta.');
+        if (requestedChannel) location.replace('/');
+      } catch (error) { status(friendlyError(error), true); }
+      finally { button.disabled = false; }
     });
     $('create-community-button').addEventListener('click', () => createCommunity().catch((error) => status(friendlyError(error), true)));
     $('add-community-button').addEventListener('click', () => createCommunity().catch((error) => status(friendlyError(error), true)));
@@ -809,7 +933,8 @@
     canSend: false,
     activeTextChannel: null,
     getAccessToken: async () => state.session?.access_token || '',
-    sendText
+    sendText,
+    refreshTextChannel
   };
 
   bindForms();
@@ -898,6 +1023,7 @@
       state.subscription = null;
       state.moderationSubscription = null;
       state.profile = null;
+      state.profiles.clear();
       state.channel = null;
       window.CaemgamoCommunity.activeTextChannel = null;
       clearChat();

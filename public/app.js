@@ -22,6 +22,7 @@ let ws, clientId = '', connected = false, roomJoined = false;
 let audioTrack = null, cameraTrack = null, screenTrack = null;
 let toastTimer, callTimer, callStartedAt, unread = 0;
 let reconnectTimer = null, reconnectAttempts = 0, socketGeneration = 0, intentionalLeave = false;
+const audioBlockedPeers = new Set();
 let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function randomRoom() {
@@ -133,9 +134,13 @@ function createPeerTile(peerId) {
   label.className = 'media-name';
   label.textContent = 'Pessoa';
   label.title = peerId;
-  tile.append(avatar, video, audio, label);
+  const status = document.createElement('span');
+  status.className = 'media-status';
+  status.setAttribute('aria-live', 'polite');
+  status.textContent = 'Conectando mídia…';
+  tile.append(avatar, video, audio, label, status);
   ui.mediaGrid.append(tile);
-  return { tile, avatar, video, audio, label };
+  return { tile, avatar, video, audio, label, status };
 }
 
 function updatePeerTile(peer) {
@@ -145,8 +150,54 @@ function updatePeerTile(peer) {
   peer.ui.avatar.hidden = Boolean(videoTrack);
   peer.ui.video.srcObject = peer.remoteStream;
   peer.ui.audio.srcObject = peer.remoteStream;
+  const state = peer.mediaState;
+  peer.ui.status.textContent = state
+    ? `${state.audio ? '🎙 Microfone ligado' : '🔇 Microfone desligado'} · ${state.sharing ? '▣ Transmitindo tela' : state.video ? '▣ Câmera ligada' : 'Câmera desligada'}`
+    : 'Aguardando estado dos controles…';
   peer.ui.video.play().catch(() => {});
-  peer.ui.audio.play().catch(() => {});
+  playPeerAudio(peer);
+}
+
+function updateAudioUnlockButton() {
+  const button = $('enable-audio-button');
+  button.hidden = audioBlockedPeers.size === 0;
+  button.setAttribute('aria-label', 'Permitir reprodução do áudio dos participantes');
+}
+
+async function playPeerAudio(peer) {
+  if (!peer.remoteStream.getAudioTracks().some((track) => track.readyState === 'live')) {
+    audioBlockedPeers.delete(peer.id);
+    updateAudioUnlockButton();
+    return;
+  }
+  try {
+    await peer.ui.audio.play();
+    audioBlockedPeers.delete(peer.id);
+    updateAudioUnlockButton();
+  } catch (error) {
+    if (error.name === 'NotAllowedError') {
+      audioBlockedPeers.add(peer.id);
+      updateAudioUnlockButton();
+      ui.systemMessage.textContent = 'O navegador bloqueou o áudio automático. Clique em “Ativar áudio dos participantes” para ouvir.';
+    } else {
+      showToast('Não foi possível reproduzir o áudio recebido. Confira a saída de som do dispositivo.');
+    }
+  }
+}
+
+async function enableRemoteAudio() {
+  const failures = [];
+  for (const peer of peers.values()) {
+    if (!peer.remoteStream.getAudioTracks().some((track) => track.readyState === 'live')) continue;
+    try {
+      await peer.ui.audio.play();
+      audioBlockedPeers.delete(peer.id);
+    } catch { failures.push(peer.id); }
+  }
+  audioBlockedPeers.clear();
+  for (const id of failures) audioBlockedPeers.add(id);
+  updateAudioUnlockButton();
+  if (failures.length) showToast('Ainda não foi possível liberar o áudio. Confira as permissões e o volume do navegador.');
 }
 
 function ensurePeer(peerId, initiator = false) {
@@ -163,7 +214,8 @@ function ensurePeer(peerId, initiator = false) {
   peer = {
     id: peerId, pc, senders: { audio: audioSender, video: videoSender },
     channel: null, pendingCandidates: [], remoteStream: new MediaStream(), ui: createPeerTile(peerId),
-    offerStarted: false, closed: false
+    polite: clientId > peerId, makingOffer: false, ignoreOffer: false, mediaState: null,
+    iceRestarts: 0, iceRestartTimer: null, closed: false
   };
   peers.set(peerId, peer);
   updatePeerTile(peer);
@@ -180,9 +232,27 @@ function ensurePeer(peerId, initiator = false) {
   pc.onconnectionstatechange = () => {
     if (peer.closed) return;
     if (pc.connectionState === 'connected') startClock();
-    if (pc.connectionState === 'failed') showToast('Não foi possível conectar uma pessoa. Verifique a rede e tente novamente.');
-    if (pc.connectionState === 'disconnected') setConnection('Reconectando mídia…', '');
+    if (pc.connectionState === 'failed') scheduleIceRestart(peer, true);
+    if (pc.connectionState === 'disconnected') {
+      setConnection('Reconectando áudio e vídeo…', '');
+      scheduleIceRestart(peer);
+    }
     if (pc.connectionState === 'connected' && roomJoined) setConnection(`Sala conectada · ${participants.size + 1}/15`, 'connected');
+    if (pc.connectionState === 'connected') {
+      peer.iceRestarts = 0;
+      clearTimeout(peer.iceRestartTimer);
+      peer.iceRestartTimer = null;
+    }
+  };
+  pc.oniceconnectionstatechange = () => {
+    if (peer.closed) return;
+    if (pc.iceConnectionState === 'failed') scheduleIceRestart(peer, true);
+    else if (pc.iceConnectionState === 'disconnected') scheduleIceRestart(peer);
+    else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      peer.iceRestarts = 0;
+      clearTimeout(peer.iceRestartTimer);
+      peer.iceRestartTimer = null;
+    }
   };
   syncPeerTracks(peer).catch(() => {});
   if (initiator) startOffer(peer).catch((error) => showToast(`Falha ao iniciar conexão: ${error.message}`));
@@ -201,19 +271,61 @@ async function syncTrackToPeers(kind, track) {
   await Promise.all(updates);
 }
 
-async function startOffer(peer) {
-  if (peer.closed || peer.offerStarted || peer.pc.signalingState !== 'stable') return;
-  peer.offerStarted = true;
-  if (!peer.channel) bindChannel(peer, peer.pc.createDataChannel('mensagens'));
-  await syncPeerTracks(peer);
-  const offer = await peer.pc.createOffer();
-  await peer.pc.setLocalDescription(offer);
-  sendSignal(peer.id, { description: peer.pc.localDescription });
+async function startOffer(peer, iceRestart = false) {
+  if (peer.closed || peer.makingOffer || peer.pc.signalingState !== 'stable') return false;
+  peer.makingOffer = true;
+  try {
+    if (!peer.channel) bindChannel(peer, peer.pc.createDataChannel('mensagens'));
+    await syncPeerTracks(peer);
+    const offer = await peer.pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
+    await peer.pc.setLocalDescription(offer);
+    sendSignal(peer.id, { description: peer.pc.localDescription });
+    return true;
+  } finally {
+    peer.makingOffer = false;
+  }
+}
+
+function scheduleIceRestart(peer, immediate = false) {
+  if (peer.closed || peer.iceRestartTimer) return;
+  if (clientId > peer.id) return;
+  if (peer.iceRestarts >= 3) {
+    setConnection('Mídia interrompida · verifique a rede e tente novamente', 'error');
+    showToast('A conexão de áudio e vídeo foi interrompida. Saia e entre novamente na sala.');
+    return;
+  }
+  const delay = immediate ? 0 : 1800;
+  peer.iceRestartTimer = setTimeout(async () => {
+    peer.iceRestartTimer = null;
+    if (peer.closed || peer.pc.connectionState === 'connected') return;
+    peer.iceRestarts++;
+    try {
+      const offered = await startOffer(peer, true);
+      if (!offered && peer.pc.signalingState !== 'stable') {
+        peer.iceRestarts--;
+        peer.iceRestartTimer = setTimeout(() => {
+          peer.iceRestartTimer = null;
+          scheduleIceRestart(peer, true);
+        }, 1000);
+        return;
+      }
+      peer.iceRestartTimer = setTimeout(() => {
+        peer.iceRestartTimer = null;
+        if (peer.pc.connectionState !== 'connected') scheduleIceRestart(peer, true);
+      }, 6000);
+    } catch {
+      if (peer.iceRestarts >= 3) {
+        setConnection('Mídia interrompida · verifique a rede e tente novamente', 'error');
+        showToast('Não foi possível restabelecer a chamada. Confira a rede, STUN/TURN e tente novamente.');
+      } else scheduleIceRestart(peer, true);
+    }
+  }, delay);
 }
 
 function bindChannel(peer, channel) {
   peer.channel = channel;
   channel.onopen = () => {
+    broadcastMediaState();
     updateChatState();
     ui.systemMessage.textContent = 'Conexão segura estabelecida. As mensagens são enviadas diretamente às pessoas da sala.';
   };
@@ -223,6 +335,10 @@ function bindChannel(peer, channel) {
     try {
       const data = JSON.parse(event.data);
       if (data.type === 'chat' && typeof data.text === 'string') addMessage(data.text, false, data.at, peer.id);
+      if (data.type === 'media-state' && typeof data.audio === 'boolean' && typeof data.video === 'boolean' && typeof data.sharing === 'boolean') {
+        peer.mediaState = data;
+        updatePeerTile(peer);
+      }
     } catch { /* ignora mensagens fora do formato esperado */ }
   };
   updateChatState();
@@ -232,12 +348,16 @@ function closePeer(peerId) {
   const peer = peers.get(peerId);
   if (!peer) return;
   peer.closed = true;
+  clearTimeout(peer.iceRestartTimer);
+  audioBlockedPeers.delete(peerId);
+  updateAudioUnlockButton();
   peer.channel?.close();
   peer.pc.close();
   peer.ui.tile.remove();
   peers.delete(peerId);
   updateStage();
   updateChatState();
+  if (![...peers.values()].some((activePeer) => activePeer.pc.connectionState === 'connected')) stopClock();
 }
 
 function clearPeers() {
@@ -344,8 +464,16 @@ async function handleSignal(peerId, data) {
   const peer = ensurePeer(peerId, false);
   if (!peer) return;
   if (data.description) {
+    const offerCollision = data.description.type === 'offer'
+      && (peer.makingOffer || peer.pc.signalingState !== 'stable');
+    peer.ignoreOffer = !peer.polite && offerCollision;
+    if (peer.ignoreOffer) return;
+    if (offerCollision) await peer.pc.setLocalDescription({ type: 'rollback' });
     await peer.pc.setRemoteDescription(data.description);
-    for (const candidate of peer.pendingCandidates) await peer.pc.addIceCandidate(candidate);
+    for (const candidate of peer.pendingCandidates) {
+      try { await peer.pc.addIceCandidate(candidate); }
+      catch (error) { if (!peer.ignoreOffer) throw error; }
+    }
     peer.pendingCandidates = [];
     if (data.description.type === 'offer') {
       await syncPeerTracks(peer);
@@ -354,6 +482,7 @@ async function handleSignal(peerId, data) {
       sendSignal(peerId, { description: peer.pc.localDescription });
     }
   } else if (data.candidate) {
+    if (peer.ignoreOffer) return;
     if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(data.candidate);
     else peer.pendingCandidates.push(data.candidate);
   }
@@ -365,40 +494,88 @@ function updateMediaButton(id, active, onText, offText) {
   button.lastElementChild.textContent = active ? onText : offText;
 }
 
+function broadcastMediaState() {
+  const message = JSON.stringify({
+    type: 'media-state',
+    audio: Boolean(audioTrack?.enabled),
+    video: Boolean(screenTrack || cameraTrack?.enabled),
+    sharing: Boolean(screenTrack)
+  });
+  for (const peer of peers.values()) {
+    if (peer.channel?.readyState === 'open') {
+      try { peer.channel.send(message); } catch { /* outro evento mostrará a reconexão */ }
+    }
+  }
+}
+
 async function toggleMic() {
   if (!roomJoined) return;
   try {
-    if (!audioTrack) {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
+    if (!audioTrack || audioTrack.readyState !== 'live') {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioTrack = stream.getAudioTracks()[0];
+      if (!audioTrack) throw new Error('Nenhum microfone foi encontrado.');
+      const track = audioTrack;
+      track.addEventListener('ended', () => {
+        if (audioTrack !== track) return;
+        audioTrack = null;
+        syncTrackToPeers('audio', null).catch(() => {});
+        updateMediaButton('mic-button', false, 'Microfone ligado', 'Microfone desligado');
+        broadcastMediaState();
+        showToast('O microfone foi desconectado. Verifique o dispositivo e ative-o novamente.');
+      }, { once: true });
       audioTrack.enabled = true;
     } else {
       audioTrack.enabled = !audioTrack.enabled;
     }
     await syncTrackToPeers('audio', audioTrack.enabled ? audioTrack : null);
+    broadcastMediaState();
     updateMediaButton('mic-button', audioTrack.enabled, 'Microfone ligado', 'Microfone desligado');
     showToast(audioTrack.enabled ? 'Microfone ligado.' : 'Microfone desligado.');
   } catch (error) {
-    showToast(error.name === 'NotAllowedError' ? 'Permita o acesso ao microfone no navegador.' : 'Não foi possível acessar o microfone.');
+    showToast(mediaErrorMessage(error, 'microfone'));
   }
 }
 
 async function toggleCamera() {
   if (!roomJoined) return;
   try {
-    if (!cameraTrack) {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
+    if (!cameraTrack || cameraTrack.readyState !== 'live') {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       cameraTrack = stream.getVideoTracks()[0];
+      if (!cameraTrack) throw new Error('Nenhuma câmera foi encontrada.');
+      const track = cameraTrack;
+      track.addEventListener('ended', () => {
+        if (cameraTrack !== track) return;
+        cameraTrack = null;
+        if (!screenTrack) syncTrackToPeers('video', null).catch(() => {});
+        updateMediaButton('camera-button', false, 'Câmera ligada', 'Câmera desligada');
+        broadcastMediaState();
+        updateStage();
+        showToast('A câmera foi desconectada. Verifique o dispositivo e ative-a novamente.');
+      }, { once: true });
       cameraTrack.enabled = true;
     } else {
       cameraTrack.enabled = !cameraTrack.enabled;
     }
     if (!screenTrack) await syncTrackToPeers('video', cameraTrack.enabled ? cameraTrack : null);
+    broadcastMediaState();
     updateMediaButton('camera-button', Boolean(cameraTrack?.enabled), 'Câmera ligada', 'Câmera desligada');
     updateStage();
   } catch (error) {
-    showToast(error.name === 'NotAllowedError' ? 'Permita o acesso à câmera no navegador.' : 'Não foi possível acessar a câmera.');
+    showToast(mediaErrorMessage(error, 'câmera'));
   }
+}
+
+function mediaErrorMessage(error, device) {
+  if (error.name === 'InsecureContextError') return `O ${device} exige HTTPS ou localhost. Abra o aplicativo pela conexão segura.`;
+  if (error.name === 'NotAllowedError' || error.name === 'SecurityError') return `Acesso ao ${device} negado. Clique no cadeado ao lado do endereço, permita o dispositivo e tente novamente.`;
+  if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') return `Nenhum ${device} foi encontrado neste dispositivo.`;
+  if (error.name === 'NotReadableError' || error.name === 'TrackStartError') return `O ${device} está ocupado ou indisponível. Feche outros aplicativos que o estejam usando.`;
+  if (error.name === 'OverconstrainedError') return `O dispositivo não oferece uma configuração compatível para o ${device}.`;
+  return `Não foi possível iniciar o ${device}. Verifique o dispositivo e tente novamente.`;
 }
 
 async function toggleScreen() {
@@ -412,6 +589,7 @@ async function toggleScreen() {
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
     screenTrack = stream.getVideoTracks()[0];
     await syncTrackToPeers('video', screenTrack);
+    broadcastMediaState();
     updateMediaButton('share-button', true, 'Parar transmissão', 'Compartilhar tela');
     screenTrack.addEventListener('ended', () => stopScreenShare().catch(() => {}), { once: true });
     updateStage();
@@ -429,6 +607,7 @@ async function stopScreenShare() {
   screenTrack = null;
   track.stop();
   await syncTrackToPeers('video', cameraTrack?.enabled ? cameraTrack : null);
+  broadcastMediaState();
   updateMediaButton('share-button', false, 'Parar transmissão', 'Compartilhar tela');
   updateStage();
 }
@@ -443,9 +622,18 @@ function startClock() {
   }, 1000);
 }
 
+function stopClock() {
+  clearInterval(callTimer);
+  callTimer = null;
+  callStartedAt = null;
+  ui.callClock.hidden = true;
+  ui.callClock.textContent = '00:00';
+}
+
 function stopLocalMedia() {
-  for (const track of [audioTrack, cameraTrack, screenTrack]) track?.stop();
+  const tracks = [audioTrack, cameraTrack, screenTrack];
   audioTrack = cameraTrack = screenTrack = null;
+  for (const track of tracks) track?.stop();
   updateMediaButton('mic-button', false, 'Microfone ligado', 'Microfone');
   updateMediaButton('camera-button', false, 'Câmera ligada', 'Câmera');
   updateMediaButton('share-button', false, 'Parar transmissão', 'Compartilhar tela');
@@ -455,6 +643,7 @@ function stopLocalMedia() {
 function addMessage(text, mine, at = Date.now(), senderId = '', displayName = '', avatarUrl = '', media = null) {
   const row = document.createElement('div');
   row.className = `message${mine ? ' mine' : ''}`;
+  row.dataset.authorId = senderId;
   const avatar = avatarUrl ? document.createElement('img') : document.createElement('span');
   avatar.className = 'chat-avatar';
   if (avatarUrl) { avatar.src = avatarUrl; avatar.alt = ''; }
@@ -501,6 +690,18 @@ function addMessage(text, mine, at = Date.now(), senderId = '', displayName = ''
   }
 }
 window.CAEMGAMO_ADD_MESSAGE = addMessage;
+window.CAEMGAMO_REFRESH_AUTHOR = (userId, displayName, avatarUrl) => {
+  document.querySelectorAll(`.message[data-author-id="${CSS.escape(userId)}"]`).forEach((row) => {
+    const existing = row.querySelector('.chat-avatar');
+    const avatar = avatarUrl ? document.createElement('img') : document.createElement('span');
+    avatar.className = 'chat-avatar';
+    if (avatarUrl) { avatar.src = avatarUrl; avatar.alt = ''; }
+    else avatar.textContent = (displayName || 'P').trim().slice(0, 1).toUpperCase();
+    existing?.replaceWith(avatar);
+    const author = row.querySelector('.message-author');
+    if (author && !row.classList.contains('mine')) author.textContent = displayName || 'Participante';
+  });
+};
 window.CAEMGAMO_UPDATE_CHAT_STATE = updateChatState;
 
 async function sendMessage(event) {
@@ -541,6 +742,7 @@ $('message-form').addEventListener('submit', sendMessage);
 $('mic-button').addEventListener('click', toggleMic);
 $('camera-button').addEventListener('click', toggleCamera);
 $('share-button').addEventListener('click', toggleScreen);
+$('enable-audio-button').addEventListener('click', enableRemoteAudio);
 $('leave-button').addEventListener('click', () => {
   intentionalLeave = true;
   clearTimeout(reconnectTimer);

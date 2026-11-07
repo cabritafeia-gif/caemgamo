@@ -37,7 +37,8 @@
         <button class="server-icon active-server" id="home-server-button" title="Salas diretas">C</button>
         <button class="server-icon add-server" id="add-community-button" title="Criar comunidade">+</button>
         <div class="rail-spacer"></div>
-        <div class="rail-user-avatar">V</div>
+        <button class="rail-user-avatar" id="rail-profile-button" type="button" title="Entrar ou abrir seu perfil" aria-label="Entrar ou abrir seu perfil">V</button>
+        <button class="rail-settings-button" id="rail-settings-button" type="button" title="Perfil e configurações" aria-label="Perfil e configurações">⚙</button>
       </aside>
 
       <aside class="sidebar">
@@ -91,11 +92,12 @@
             <button class="control-button leave-control" id="leave-button" disabled><span class="control-icon">×</span><span>Sair</span></button>
           </div>
           <p class="control-caption" id="control-caption">Entre na sala para ativar áudio, vídeo e compartilhamento.</p>
+          <button class="enable-audio-button" id="enable-audio-button" type="button" hidden>🔊 Ativar áudio dos participantes</button>
         </section>
       </section>
 
       <aside class="chat-panel">
-        <div class="chat-header" id="chat-header"><div><h2>Bate-papo</h2><span>Mensagens da sala</span></div><button class="icon-button chat-menu" id="chat-menu" aria-label="Opções da conversa">···</button></div>
+        <div class="chat-header" id="chat-header"><div><h2>Bate-papo</h2><span>Mensagens da sala</span></div><div class="chat-menu-wrap"><button class="icon-button chat-menu" id="chat-menu" type="button" aria-label="Opções da conversa" aria-expanded="false" aria-controls="chat-menu-options">···</button><div class="chat-menu-options" id="chat-menu-options" hidden><button id="refresh-chat-button" type="button">↻ Atualizar mensagens</button><button id="copy-chat-invite-button" type="button">↗ Copiar link desta sala</button></div></div></div>
         <div class="chat-body" id="chat-body">
           <div class="day-divider"><span>HOJE</span></div>
           <div class="welcome-message"><div class="welcome-icon">✦</div><strong>Bem-vindo ao CAEMGAMO</strong><p>As mensagens da sala aparecem aqui.</p></div>
