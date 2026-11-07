@@ -89,9 +89,10 @@ class RoomManager {
 
       room.clients.set(client.id, client);
       client.room = roomName;
+      const iceServers = await this.getIceServers(client.id);
       this.send(client, {
         type: 'joined', room: roomName, clientId: client.id, count,
-        participants: existing, iceServers: this.getIceServers(client.id)
+        participants: existing, iceServers
       });
       if (existing.length) {
         await this.redis.publish(room.channel, JSON.stringify({ type: 'peer-joined', from: client.id }));
@@ -100,16 +101,17 @@ class RoomManager {
     });
   }
 
-  joinMemory(client, roomName) {
+  async joinMemory(client, roomName) {
     const room = this.memoryRooms.get(roomName) || new Map();
     if (room.size >= ROOM_LIMIT) return { full: true };
     const existing = [...room.values()];
     room.set(client.id, client);
     this.memoryRooms.set(roomName, room);
     client.room = roomName;
+    const iceServers = await this.getIceServers(client.id);
     this.send(client, {
       type: 'joined', room: roomName, clientId: client.id, count: room.size,
-      participants: existing.map((other) => other.id), iceServers: this.getIceServers(client.id)
+      participants: existing.map((other) => other.id), iceServers
     });
     for (const other of existing) {
       this.send(other, { type: 'peer-joined', peerId: client.id, initiator: other.id < client.id });
@@ -232,3 +234,4 @@ class RoomManager {
 }
 
 module.exports = { RoomManager };
+

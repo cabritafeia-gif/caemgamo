@@ -1,11 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { server, canJoinVoiceChannel } = require('../server');
+const { server, canJoinVoiceChannel, getIceServers } = require('../server');
 
 const VALID_CHANNEL = '10000000-0000-4000-8000-000000000001';
 const originalFetch = global.fetch;
 const originalUrl = process.env.SUPABASE_URL;
 const originalKey = process.env.SUPABASE_ANON_KEY;
+const originalTurnEnv = Object.fromEntries([
+  'CLOUDFLARE_TURN_KEY_ID', 'CLOUDFLARE_TURN_API_TOKEN', 'CLOUDFLARE_TURN_TTL_SECONDS',
+  'TURN_URLS', 'TURN_SHARED_SECRET', 'TURN_TTL_SECONDS', 'STUN_URLS'
+].map((key) => [key, process.env[key]]));
 
 test('HTTP app serves the shell, public config, and security headers', async () => {
   process.env.SUPABASE_URL = 'https://project.supabase.co';
@@ -30,6 +34,52 @@ test.after(() => {
   global.fetch = originalFetch;
   if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
   if (originalKey === undefined) delete process.env.SUPABASE_ANON_KEY; else process.env.SUPABASE_ANON_KEY = originalKey;
+  for (const [key, value] of Object.entries(originalTurnEnv)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+});
+
+test('Cloudflare TURN credentials are fetched server-side and passed as ICE servers', async () => {
+  process.env.CLOUDFLARE_TURN_KEY_ID = 'turn-key-id';
+  process.env.CLOUDFLARE_TURN_API_TOKEN = 'private-api-token';
+  delete process.env.CLOUDFLARE_TURN_TTL_SECONDS;
+  delete process.env.TURN_URLS;
+  delete process.env.TURN_SHARED_SECRET;
+  let request;
+  global.fetch = async (url, options) => {
+    request = { url, options };
+    return {
+      ok: true,
+      status: 201,
+      json: async () => ({ iceServers: [
+        { urls: ['stun:stun.cloudflare.com:3478'] },
+        { urls: ['turn:turn.cloudflare.com:3478?transport=udp'], username: 'short-lived-user', credential: 'short-lived-password' }
+      ] })
+    };
+  };
+
+  const iceServers = await getIceServers('test-client');
+  assert.equal(request.url, 'https://rtc.live.cloudflare.com/v1/turn/keys/turn-key-id/credentials/generate-ice-servers');
+  assert.equal(request.options.method, 'POST');
+  assert.equal(request.options.headers.Authorization, 'Bearer private-api-token');
+  assert.deepEqual(JSON.parse(request.options.body), { ttl: 172800 });
+  assert.ok(iceServers.some((entry) => entry.username === 'short-lived-user' && entry.credential === 'short-lived-password'));
+  assert.equal(JSON.stringify(iceServers).includes('private-api-token'), false);
+});
+
+test('Cloudflare TURN TTL is clamped to the documented 48-hour maximum', async () => {
+  process.env.CLOUDFLARE_TURN_KEY_ID = 'turn-key-id';
+  process.env.CLOUDFLARE_TURN_API_TOKEN = 'private-api-token';
+  process.env.CLOUDFLARE_TURN_TTL_SECONDS = '999999';
+  let requestBody;
+  global.fetch = async (_url, options) => {
+    requestBody = JSON.parse(options.body);
+    return { ok: true, status: 201, json: async () => ({ iceServers: [
+      { urls: ['turn:turn.cloudflare.com:3478'], username: 'u', credential: 'p' }
+    ] }) };
+  };
+  await getIceServers('test-client');
+  assert.deepEqual(requestBody, { ttl: 172800 });
 });
 
 test('community voice access is denied until Supabase is configured', async () => {
@@ -72,3 +122,4 @@ test('voice authorization fails closed when Supabase denies or is unavailable', 
   global.fetch = async () => ({ ok: false, json: async () => true });
   assert.equal(await canJoinVoiceChannel(VALID_CHANNEL, 'x'.repeat(60)), false);
 });
+

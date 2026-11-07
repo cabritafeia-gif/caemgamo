@@ -105,9 +105,53 @@ function sendFrame(client, opcode, payload = Buffer.alloc(0)) {
 
 function send(client, value) { sendFrame(client, 1, JSON.stringify(value)); }
 
-function getIceServers(clientId) {
+async function getIceServers(clientId) {
   const urls = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302').split(',').map((value) => value.trim()).filter(Boolean);
   const iceServers = urls.map((url) => ({ urls: url }));
+
+  const cloudflareKeyId = (process.env.CLOUDFLARE_TURN_KEY_ID || '').trim();
+  const cloudflareApiToken = (process.env.CLOUDFLARE_TURN_API_TOKEN || '').trim();
+  if (cloudflareKeyId || cloudflareApiToken) {
+    if (!cloudflareKeyId || !cloudflareApiToken) {
+      console.warn('Cloudflare TURN está incompleto; esta sala usará somente STUN.');
+      return iceServers;
+    }
+
+    const configuredTtl = Number(process.env.CLOUDFLARE_TURN_TTL_SECONDS || 172_800);
+    const ttl = Number.isFinite(configuredTtl) ? Math.max(300, Math.min(configuredTtl, 172_800)) : 172_800;
+    const endpoint = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(cloudflareKeyId)}/credentials/generate-ice-servers`;
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cloudflareApiToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ttl }),
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!response.ok) {
+        console.warn(`Cloudflare TURN respondeu HTTP ${response.status}; esta sala usará somente STUN.`);
+        return iceServers;
+      }
+
+      const payload = await response.json();
+      const turnServers = Array.isArray(payload?.iceServers) ? payload.iceServers.filter((entry) => {
+        const serverUrls = Array.isArray(entry?.urls) ? entry.urls : [entry?.urls];
+        return typeof entry?.username === 'string' && typeof entry?.credential === 'string' &&
+          serverUrls.some((url) => typeof url === 'string' && /^turns?:/i.test(url));
+      }) : [];
+      if (!turnServers.length) {
+        console.warn('Cloudflare TURN não retornou servidores TURN válidos; esta sala usará somente STUN.');
+        return iceServers;
+      }
+      return [...iceServers, ...turnServers];
+    } catch {
+      console.warn('Não foi possível obter credenciais TURN da Cloudflare; esta sala usará somente STUN.');
+      return iceServers;
+    }
+  }
+
   const turnUrls = (process.env.TURN_URLS || '').split(',').map((value) => value.trim()).filter(Boolean);
   const sharedSecret = process.env.TURN_SHARED_SECRET;
   if (turnUrls.length && sharedSecret) {
@@ -305,4 +349,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, start, canJoinVoiceChannel, originAllowed, takeRate };
+module.exports = { server, start, canJoinVoiceChannel, getIceServers, originAllowed, takeRate };
+
