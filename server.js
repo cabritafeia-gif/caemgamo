@@ -7,6 +7,7 @@ const { RoomManager } = require('./room-manager');
 const ROOT = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 4173);
 const MAX_FRAME_BYTES = 1024 * 1024;
+const DIRECT_ROOM_PATTERN = /^direct-([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 const clients = new Map();
 const rateBuckets = new Map();
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -25,7 +26,9 @@ const SECURITY_HEADERS = {
 };
 
 const server = http.createServer((req, res) => {
-  const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
+  catch { res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Caminho inválido'); return; }
   if (pathname === '/config.json') {
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -43,8 +46,9 @@ const server = http.createServer((req, res) => {
   }
   if (pathname === '/readyz') {
     const ready = roomManager.isReady;
+    const turnProvider = getTurnProvider();
     res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-      .end(JSON.stringify({ status: ready ? 'ready' : 'not-ready', backend: process.env.REDIS_URL ? 'redis' : 'memory' }));
+      .end(JSON.stringify({ status: ready ? 'ready' : 'not-ready', backend: process.env.REDIS_URL ? 'redis' : 'memory', turn: turnProvider }));
     return;
   }
   const requested = pathname === '/' ? '/index.html' : pathname;
@@ -80,7 +84,7 @@ server.on('upgrade', (req, socket) => {
   }
   const accept = crypto.createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-  const client = { id: crypto.randomBytes(16).toString('base64url'), socket, room: null, ip, buffer: Buffer.alloc(0), closed: false, awaitingPong: false, lastPing: 0, signalWindow: 0, signalCount: 0 };
+  const client = { id: crypto.randomBytes(16).toString('base64url'), socket, room: null, ip, buffer: Buffer.alloc(0), closed: false, awaitingPong: false, lastPing: 0, signalWindow: 0, signalCount: 0, userId: null, authAccessToken: '', authVerifiedAt: 0, voiceChannelId: null, directConversationId: null };
   clients.set(client.id, client);
   socket.on('data', (chunk) => consume(client, chunk));
   socket.on('close', () => disconnect(client));
@@ -183,6 +187,12 @@ function clientIp(req) {
   return req.socket.remoteAddress || 'unknown';
 }
 
+function getTurnProvider() {
+  if (process.env.CLOUDFLARE_TURN_KEY_ID?.trim() && process.env.CLOUDFLARE_TURN_KEY_TOKEN?.trim()) return 'cloudflare-configured';
+  if ((process.env.TURN_URLS || '').split(',').some((value) => value.trim()) && process.env.TURN_SHARED_SECRET) return 'coturn-configured';
+  return 'stun-only';
+}
+
 function takeRate(key, limit, windowMs) {
   const now = Date.now();
   let bucket = rateBuckets.get(key);
@@ -250,37 +260,59 @@ async function handleMessage(client, message) {
     if (!roomName) { send(client, { type: 'error', message: 'Código de sala inválido.' }); return; }
     const channelId = String(message.channelId || '');
     const uuidRoom = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(roomName);
-    if ((uuidRoom && channelId !== roomName) || (channelId && channelId !== roomName)) {
+    if ((uuidRoom && channelId !== roomName) || (channelId && channelId !== roomName) ||
+        (roomName.startsWith('direct-') && !DIRECT_ROOM_PATTERN.test(roomName))) {
       send(client, { type: 'error', message: 'Canal de voz inválido.' });
       return;
     }
-    client.voiceChannelId = null;
-    client.voiceAccessToken = '';
-    if (channelId) {
-      const allowed = await canJoinVoiceChannel(channelId, message.accessToken);
-      if (!allowed) {
-        send(client, { type: 'error', message: 'Você precisa entrar na comunidade e ter acesso a este canal de voz.' });
-        return;
-      }
-      client.voiceChannelId = channelId;
-      client.voiceAccessToken = message.accessToken;
+    const authorization = await authorizeRoomJoin(roomName, channelId, message.accessToken);
+    if (!authorization.user) {
+      send(client, { type: 'error', message: authorization.error });
+      if (authorization.authenticationRequired) client.socket.end();
+      return;
     }
+    if (authorization.error) { send(client, { type: 'error', message: authorization.error }); return; }
+    client.voiceChannelId = null;
+    client.directConversationId = null;
+    client.authAccessToken = message.accessToken;
+    client.authVerifiedAt = Date.now();
+    client.userId = authorization.user.id;
+    client.voiceChannelId = authorization.voiceChannelId;
+    client.directConversationId = authorization.directConversationId;
     let result;
     try { result = await roomManager.join(client, roomName); }
     catch (error) { await roomManager.leave(client); throw error; }
-    if (result.full) send(client, { type: 'full' });
+    if (result.full) {
+      client.userId = null;
+      client.authAccessToken = '';
+      client.authVerifiedAt = 0;
+      client.voiceChannelId = null;
+      client.directConversationId = null;
+      send(client, { type: 'full' });
+    }
     return;
   }
-  if (message.type === 'voice-auth-refresh' && client.voiceChannelId) {
-    if (!takeRate(`voice-auth-refresh:${client.id}`, 6, 60_000)) { client.socket.destroy(); return; }
-    if (String(message.channelId || '') !== client.voiceChannelId) { client.socket.destroy(); return; }
+  if ((message.type === 'auth-refresh' || message.type === 'voice-auth-refresh') && client.room) {
+    if (!takeRate(`auth-refresh:${client.id}`, 6, 60_000)) { client.socket.destroy(); return; }
     const accessToken = message.accessToken;
-    if (!(await canJoinVoiceChannel(client.voiceChannelId, accessToken))) {
+    const user = await getSupabaseUser(accessToken);
+    if (!user || user.id !== client.userId) {
+      send(client, { type: 'error', message: 'Sua sessão expirou. Entre novamente na sua conta.' });
+      client.socket.destroy();
+      return;
+    }
+    if (client.voiceChannelId && (String(message.channelId || '') !== client.voiceChannelId || !(await canJoinVoiceChannel(client.voiceChannelId, accessToken)))) {
       send(client, { type: 'error', message: 'Seu acesso ao canal de voz foi encerrado.' });
       client.socket.destroy();
       return;
     }
-    client.voiceAccessToken = accessToken;
+    if (client.directConversationId && !(await canJoinDirectConversation(client.directConversationId, accessToken))) {
+      send(client, { type: 'error', message: 'O acesso à chamada direta foi encerrado.' });
+      client.socket.destroy();
+      return;
+    }
+    client.authAccessToken = accessToken;
+    client.authVerifiedAt = Date.now();
     return;
   }
   if (message.type === 'signal' && client.room) {
@@ -313,6 +345,59 @@ async function canJoinVoiceChannel(channelId, accessToken) {
   } catch { return false; }
 }
 
+async function getSupabaseUser(accessToken) {
+  if (typeof accessToken !== 'string' || accessToken.length < 40 || accessToken.length > 8192 ||
+      !process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return null;
+  try {
+    const response = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
+      headers: { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return null;
+    const user = await response.json();
+    return typeof user?.id === 'string' && user.id ? user : null;
+  } catch { return null; }
+}
+
+async function authorizeRoomJoin(roomName, channelId, accessToken) {
+  const user = await getSupabaseUser(accessToken);
+  if (!user) return { user: null, error: 'Entre na sua conta CAEMGAMO antes de entrar em uma sala.', authenticationRequired: true };
+  if (channelId) {
+    if (!(await canJoinVoiceChannel(channelId, accessToken))) {
+      return { user, error: 'Você precisa entrar na comunidade e ter acesso a este canal de voz.' };
+    }
+    return { user, voiceChannelId: channelId, directConversationId: null };
+  }
+  const directRoom = DIRECT_ROOM_PATTERN.exec(roomName);
+  if (directRoom) {
+    if (!(await canJoinDirectConversation(directRoom[1], accessToken))) {
+      return { user, error: 'Esta chamada exige uma amizade e uma conversa direta ativas.' };
+    }
+    return { user, voiceChannelId: null, directConversationId: directRoom[1] };
+  }
+  return { user, voiceChannelId: null, directConversationId: null };
+}
+
+async function canJoinDirectConversation(conversationId, accessToken) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(conversationId) ||
+      typeof accessToken !== 'string' || accessToken.length < 40 || accessToken.length > 8192 ||
+      !process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return false;
+  try {
+    const response = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/can_access_direct_conversation`, {
+      method: 'POST',
+      headers: {
+        apikey: process.env.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_conversation_id: conversationId }),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return false;
+    return (await response.json()) === true;
+  } catch { return false; }
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const client of clients.values()) {
@@ -321,10 +406,18 @@ setInterval(() => {
     client.lastPing = now;
     sendFrame(client, 9);
     roomManager.refresh(client).catch((error) => console.warn('Falha ao renovar participante da sala:', error.message));
-    if (client.voiceChannelId && client.voiceAccessToken) {
-      canJoinVoiceChannel(client.voiceChannelId, client.voiceAccessToken).then((allowed) => {
+    if (client.room && now - client.authVerifiedAt > 90_000) {
+      send(client, { type: 'error', message: 'A sessão da sala expirou. Entre novamente para continuar.' });
+      client.socket.destroy();
+      continue;
+    }
+    if (client.room && client.authAccessToken && (client.voiceChannelId || client.directConversationId)) {
+      const accessCheck = client.voiceChannelId
+        ? canJoinVoiceChannel(client.voiceChannelId, client.authAccessToken)
+        : canJoinDirectConversation(client.directConversationId, client.authAccessToken);
+      accessCheck.then((allowed) => {
         if (!allowed && !client.closed) {
-          send(client, { type: 'error', message: 'Seu acesso ao canal de voz foi encerrado.' });
+          send(client, { type: 'error', message: client.voiceChannelId ? 'Seu acesso ao canal de voz foi encerrado.' : 'O acesso à chamada direta foi encerrado.' });
           client.socket.destroy();
         }
       }).catch(() => {
@@ -349,4 +442,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, start, canJoinVoiceChannel, getIceServers, originAllowed, takeRate };
+module.exports = { server, start, canJoinVoiceChannel, canJoinDirectConversation, getSupabaseUser, authorizeRoomJoin, getIceServers, getTurnProvider, originAllowed, takeRate };

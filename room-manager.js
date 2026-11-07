@@ -92,7 +92,7 @@ class RoomManager {
       const iceServers = await this.getIceServers(client.id);
       this.send(client, {
         type: 'joined', room: roomName, clientId: client.id, count,
-        participants: existing, iceServers
+        participants: existing, iceServers, turnAvailable: hasTurnCredentials(iceServers)
       });
       if (existing.length) {
         await this.redis.publish(room.channel, JSON.stringify({ type: 'peer-joined', from: client.id }));
@@ -111,7 +111,7 @@ class RoomManager {
     const iceServers = await this.getIceServers(client.id);
     this.send(client, {
       type: 'joined', room: roomName, clientId: client.id, count: room.size,
-      participants: existing.map((other) => other.id), iceServers
+      participants: existing.map((other) => other.id), iceServers, turnAvailable: hasTurnCredentials(iceServers)
     });
     for (const other of existing) {
       this.send(other, { type: 'peer-joined', peerId: client.id, initiator: other.id < client.id });
@@ -231,6 +231,13 @@ class RoomManager {
       if (this.roomLocks.get(roomName) === current) this.roomLocks.delete(roomName);
     }
   }
+}
+
+function hasTurnCredentials(iceServers) {
+  return Array.isArray(iceServers) && iceServers.some((entry) => {
+    const urls = Array.isArray(entry?.urls) ? entry.urls : [entry?.urls];
+    return Boolean(entry?.username && entry?.credential && urls.some((url) => typeof url === 'string' && /^turns?:/i.test(url)));
+  });
 }
 
 module.exports = { RoomManager };

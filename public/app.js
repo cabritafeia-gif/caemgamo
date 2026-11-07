@@ -21,7 +21,7 @@ const participants = new Set();
 let ws, clientId = '', connected = false, roomJoined = false;
 let audioTrack = null, cameraTrack = null, screenTrack = null;
 let toastTimer, callTimer, callStartedAt, unread = 0;
-let reconnectTimer = null, reconnectAttempts = 0, socketGeneration = 0, intentionalLeave = false;
+let reconnectTimer = null, reconnectAttempts = 0, socketGeneration = 0, intentionalLeave = true, everJoinedRoom = false;
 const audioBlockedPeers = new Set();
 let mediaUserId = '__boot__', mediaPreferences = { audioInputId: '', audioOutputId: '', videoInputId: '' };
 let microphoneTestStream = null, microphoneTestContext = null, microphoneTestFrame = null, cameraPreviewStream = null, cameraPreviewOwnsTrack = false;
@@ -364,6 +364,7 @@ function updateParticipants() {
     : 'Você pode ligar e desligar o microfone e iniciar a transmissão a qualquer momento.';
   for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = !roomJoined;
   $('rejoin-button').hidden = roomJoined || !intentionalLeave;
+  $('rejoin-button').textContent = everJoinedRoom ? 'Entrar novamente na sala' : 'Entrar na sala';
   if (roomJoined) setConnection(`Sala conectada · ${count}/15`, 'connected');
   updateStage();
   updateChatState();
@@ -431,7 +432,11 @@ function updatePeerTile(peer) {
   const state = peer.mediaState;
   peer.ui.status.textContent = state
     ? `${state.audio ? '🎙 Microfone ligado' : '🔇 Microfone desligado'} · ${state.sharing ? '▣ Transmitindo tela' : state.video ? '▣ Câmera ligada' : 'Câmera desligada'}`
-    : 'Aguardando estado dos controles…';
+    : peer.pc.connectionState === 'connected'
+      ? 'Mídia conectada · aguardando controles'
+      : ['failed', 'disconnected'].includes(peer.pc.connectionState)
+        ? 'Conexão de mídia interrompida · verificando a rede'
+        : 'Conectando áudio e vídeo…';
   peer.ui.video.play().catch(() => {});
   playPeerAudio(peer);
 }
@@ -509,6 +514,7 @@ function ensurePeer(peerId, initiator = false) {
   pc.ondatachannel = (event) => bindChannel(peer, event.channel);
   pc.onconnectionstatechange = () => {
     if (peer.closed) return;
+    updatePeerTile(peer);
     if (pc.connectionState === 'connected') startClock();
     if (pc.connectionState === 'failed') scheduleIceRestart(peer, true);
     if (pc.connectionState === 'disconnected') {
@@ -524,6 +530,7 @@ function ensurePeer(peerId, initiator = false) {
   };
   pc.oniceconnectionstatechange = () => {
     if (peer.closed) return;
+    updatePeerTile(peer);
     if (pc.iceConnectionState === 'failed') scheduleIceRestart(peer, true);
     else if (pc.iceConnectionState === 'disconnected') scheduleIceRestart(peer);
     else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
@@ -658,11 +665,16 @@ function connect() {
     if (socket !== ws || generation !== socketGeneration) return;
     connected = true;
     reconnectAttempts = 0;
-    if (requestedChannel) {
-      try { await window.CaemgamoCommunity?.ready; } catch { /* o servidor recusará canais sem autenticação válida */ }
-    }
+    try { await window.CaemgamoCommunity?.ready; } catch { /* a interface mostrará a falha de inicialização */ }
     if (socket !== ws || generation !== socketGeneration || socket.readyState !== WebSocket.OPEN) return;
     const accessToken = await window.CaemgamoCommunity?.getAccessToken?.();
+    if (!accessToken) {
+      intentionalLeave = true;
+      setConnection('Entre na sua conta para acessar a sala', 'error');
+      window.CAEMGAMO_OPEN_ACCOUNT?.();
+      socket.close();
+      return;
+    }
     socket.send(JSON.stringify({ type: 'join', room, channelId: requestedChannel || '', accessToken: accessToken || '' }));
     setConnection('Entrando na sala…');
   });
@@ -674,13 +686,19 @@ function connect() {
       clientId = String(message.clientId || '');
       if (Array.isArray(message.iceServers) && message.iceServers.length) iceServers = message.iceServers;
       roomJoined = true;
+      everJoinedRoom = true;
       participants.clear();
       for (const id of message.participants || []) {
         if (id !== clientId) participants.add(String(id));
       }
       updateParticipants();
+      ui.systemMessage.textContent = message.turnAvailable
+        ? 'Conexão segura estabelecida. O relay TURN está disponível para redes que não aceitam conexão direta.'
+        : 'A sala está conectada. O relay TURN não está disponível; o app tentará STUN, mas algumas redes podem bloquear áudio, vídeo ou transmissão.';
       for (const id of participants) ensurePeer(id, clientId < id);
-      if (!participants.size) ui.systemMessage.textContent = 'Você já pode ativar o microfone ou transmitir sua tela. As outras pessoas ouvirão e verão a transmissão ao entrar.';
+      if (!participants.size) ui.systemMessage.textContent = message.turnAvailable
+        ? 'Você já pode ativar o microfone ou transmitir sua tela. O relay TURN está disponível para quando outras pessoas entrarem.'
+        : 'Você já pode ativar o microfone ou transmitir sua tela. O app tentará STUN; redes restritivas podem exigir TURN para que as outras pessoas recebam a mídia.';
     } else if (message.type === 'peer-joined') {
       const peerId = String(message.peerId || '');
       if (!peerId || peerId === clientId) return;
@@ -699,12 +717,30 @@ function connect() {
       catch (error) { showToast(`Falha ao conectar: ${error.message}`); }
     } else if (message.type === 'full') {
       roomJoined = false;
+      intentionalLeave = true;
       updateParticipants();
       setConnection('Sala cheia · máximo 15 pessoas', 'error');
       showToast('Esta sala já atingiu o limite de 15 participantes.');
+      socket.close();
     } else if (message.type === 'error') {
       setConnection('Não foi possível entrar', 'error');
       showToast(message.message || 'Erro ao entrar na sala.');
+      if (/sessão expirou|entre na sua conta/i.test(message.message || '')) {
+        intentionalLeave = true;
+        endCurrentCall();
+        window.CAEMGAMO_FORCE_REAUTH?.();
+        return;
+      }
+      if (/acesso.*encerrado/i.test(message.message || '')) {
+        intentionalLeave = true;
+        endCurrentCall();
+        return;
+      }
+      if (!roomJoined) {
+        intentionalLeave = true;
+        updateParticipants();
+        socket.close();
+      }
     }
   });
   socket.addEventListener('close', () => {
@@ -985,12 +1021,16 @@ function endCurrentCall() {
 window.CAEMGAMO_END_CALL = endCurrentCall;
 window.CAEMGAMO_IS_CALL_ACTIVE = () => roomJoined;
 function reconnectToRoom() {
-  if (!intentionalLeave) return;
+  if (!window.CaemgamoCommunity?.getAccessToken?.()) {
+    window.CAEMGAMO_OPEN_ACCOUNT?.();
+    return;
+  }
   intentionalLeave = false;
   reconnectAttempts = 0;
   setConnection('Reconectando…');
   ui.caption.textContent = 'Conectando novamente à sala…';
-  if (!ws || ws.readyState >= WebSocket.CLOSING) connect();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+  else if (!ws || ws.readyState >= WebSocket.CLOSING) connect();
 }
 window.CAEMGAMO_RECONNECT_CALL = reconnectToRoom;
 
@@ -1153,15 +1193,47 @@ ui.installButton.addEventListener('click', async () => {
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
-if (requestedChannel) {
-  setInterval(async () => {
-    if (ws?.readyState !== WebSocket.OPEN) return;
-    try {
-      await window.CaemgamoCommunity?.ready;
-      const accessToken = await window.CaemgamoCommunity?.getAccessToken?.();
-      if (accessToken && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'voice-auth-refresh', channelId: requestedChannel, accessToken }));
-    } catch { /* reconexão ou renovação da sessão cuidará do próximo ciclo */ }
-  }, 20_000);
-}
+const refreshRoomAuthorization = async () => {
+  if (ws?.readyState !== WebSocket.OPEN || !roomJoined) return;
+  try {
+    await window.CaemgamoCommunity?.ready;
+    const accessToken = await window.CaemgamoCommunity?.getAccessToken?.();
+    if (accessToken && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'auth-refresh', channelId: requestedChannel, accessToken }));
+  } catch { /* reconexão ou renovação da sessão cuidará do próximo ciclo */ }
+};
+setInterval(refreshRoomAuthorization, 30_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshRoomAuthorization(); });
 updateParticipants();
-connect();
+setConnection('Verificando sua conta…');
+Promise.resolve(window.CaemgamoCommunity?.ready).then(() => {
+  if (window.CaemgamoCommunity?.getAccessToken?.()) {
+    intentionalLeave = true;
+    setConnection('Conta conectada · entre na sala');
+    updateParticipants();
+  } else {
+    intentionalLeave = true;
+    setConnection('Entre na sua conta para acessar a sala', 'error');
+    window.CAEMGAMO_OPEN_ACCOUNT?.();
+    updateParticipants();
+  }
+}).catch(() => {
+  intentionalLeave = true;
+  setConnection('Não foi possível verificar sua conta', 'error');
+  window.CAEMGAMO_OPEN_ACCOUNT?.();
+  updateParticipants();
+});
+window.CAEMGAMO_ROOM_AUTH_CHANGED = (authenticated) => {
+  if (authenticated) {
+    if (!roomJoined) {
+      intentionalLeave = true;
+      setConnection(everJoinedRoom ? 'Conta conectada · entre novamente na sala' : 'Conta conectada · entre na sala');
+      updateParticipants();
+    }
+  } else {
+    endCurrentCall();
+    intentionalLeave = true;
+    setConnection('Entre na sua conta para acessar a sala', 'error');
+    $('rejoin-button').hidden = true;
+    window.CAEMGAMO_OPEN_ACCOUNT?.();
+  }
+};

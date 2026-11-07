@@ -194,10 +194,10 @@
           </section>
           <section class="account-settings-section" data-settings-section="profile" hidden>
             <h3>Perfil</h3>
-            <div class="profile-avatar-row"><img id="profile-image" alt="Avatar do perfil" hidden><span id="profile-initial" class="profile-initial">C</span><label class="link-action upload-label">Enviar imagem<input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></label></div>
+            <div class="profile-avatar-row"><img id="profile-image" alt="Avatar do perfil" hidden><span id="profile-initial" class="profile-initial">C</span><label class="link-action upload-label">Enviar imagem<input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></label><button class="link-action" id="remove-avatar-button" type="button">Remover imagem</button></div>
             <div class="preset-avatar-list" aria-label="Avatares prontos"><button type="button" data-preset-avatar="fox" aria-label="Raposa">🦊</button><button type="button" data-preset-avatar="cat" aria-label="Gato">🐱</button><button type="button" data-preset-avatar="owl" aria-label="Coruja">🦉</button><button type="button" data-preset-avatar="frog" aria-label="Sapo">🐸</button><button type="button" data-preset-avatar="star" aria-label="Estrela">⭐</button><button type="button" data-preset-avatar="heart" aria-label="Coração">💜</button><button type="button" data-preset-avatar="robot" aria-label="Robô">🤖</button><button type="button" data-preset-avatar="flower" aria-label="Flor">🌼</button></div>
             <p class="settings-summary">Seu identificador para adicionar amigos: <strong id="profile-handle">—</strong></p>
-            <form id="profile-form" class="account-form"><label>Nome de exibição<input name="display_name" maxlength="32" required></label><button class="primary-action" type="submit">Salvar perfil</button></form>
+            <form id="profile-form" class="account-form"><label>Nome de usuário<input name="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_]{2,31}" autocomplete="username" required></label><p class="settings-summary">Use de 3 a 32 letras, números ou sublinhados; comece com letra ou número.</p><label>Nome de exibição<input name="display_name" maxlength="32" autocomplete="nickname" required></label><button class="primary-action" type="submit">Salvar perfil</button></form>
           </section>
           <section class="account-settings-section" data-settings-section="voice" hidden>
             <h3>Voz e vídeo</h3>

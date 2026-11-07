@@ -17,13 +17,26 @@ test('profile controls and account actions remain connected in the client', () =
   assert.match(community, /\['profile-button', 'rail-profile-button', 'rail-settings-button'\]\) \$\(id\)\.addEventListener\('click', openAccount\)/);
   assert.match(community, /auth\.signOut\(\{ scope: 'local' \}\)/);
   assert.match(community, /state\.session = null;\s*await settleAuth\(\)/);
+  const logout = community.slice(community.indexOf("$('sign-out-button').addEventListener"), community.indexOf("$('create-community-button').addEventListener"));
+  assert.match(logout, /openAccount\(\);\s*closeSocialViews\(\);\s*status\('Você saiu da conta\.'\)/);
+  assert.doesNotMatch(logout, /\$\('account-dialog'\)\.hidden = true/);
+  assert.match(community, /window\.CAEMGAMO_OPEN_ACCOUNT = openAccount/);
+  assert.match(community, /window\.CAEMGAMO_ROOM_AUTH_CHANGED\?\.\(false\)/);
+  assert.match(app, /Entre na sua conta para acessar a sala/);
+  assert.match(app, /type: 'auth-refresh'/);
+  assert.match(app, /if \(!ws \|\| ws\.readyState >= WebSocket\.CLOSING\) connect\(\)/);
+  assert.match(html, /name="username" minlength="3" maxlength="32"/);
+  assert.match(community, /update\(\{ display_name, username \}\)/);
+  assert.match(community, /window\.CAEMGAMO_ROOM_AUTH_CHANGED\?\.\(true\)/);
 });
 
 test('avatar controls have a visible fallback and refresh cached message profiles', () => {
-  for (const id of ['profile-image', 'profile-initial', 'avatar-file']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['profile-image', 'profile-initial', 'avatar-file', 'remove-avatar-button']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(community, /image\.onerror = \(\) =>/);
   assert.match(community, /CAEMGAMO_REFRESH_AUTHOR\?\./);
   assert.match(app, /window\.CAEMGAMO_REFRESH_AUTHOR =/);
+  assert.match(community, /async function removeAvatar\(\)/);
+  assert.match(community, /update\(\{ avatar_path: null \}\)/);
 });
 
 test('voice controls expose recovery for blocked playback and ICE reconnection', () => {

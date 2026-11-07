@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { server, canJoinVoiceChannel, getIceServers } = require('../server');
+const { server, canJoinVoiceChannel, canJoinDirectConversation, getSupabaseUser, authorizeRoomJoin, getIceServers, getTurnProvider } = require('../server');
 
 const VALID_CHANNEL = '10000000-0000-4000-8000-000000000001';
 const originalFetch = global.fetch;
@@ -25,6 +25,11 @@ test('HTTP app serves the shell, public config, and security headers', async () 
     const config = await originalFetch(`http://127.0.0.1:${address.port}/config.json`);
     assert.equal(config.headers.get('cache-control'), 'no-store');
     assert.deepEqual(await config.json(), { supabaseUrl: process.env.SUPABASE_URL, supabaseAnonKey: process.env.SUPABASE_ANON_KEY });
+    const readiness = await originalFetch(`http://127.0.0.1:${address.port}/readyz`);
+    assert.equal(readiness.status, 200);
+    assert.equal((await readiness.json()).turn, getTurnProvider());
+    const malformed = await originalFetch(`http://127.0.0.1:${address.port}/%`);
+    assert.equal(malformed.status, 400);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -121,4 +126,69 @@ test('voice authorization fails closed when Supabase denies or is unavailable', 
   assert.equal(await canJoinVoiceChannel(VALID_CHANNEL, 'x'.repeat(60)), false);
   global.fetch = async () => ({ ok: false, json: async () => true });
   assert.equal(await canJoinVoiceChannel(VALID_CHANNEL, 'x'.repeat(60)), false);
+});
+
+test('room authentication validates the signed-in Supabase user', async () => {
+  process.env.SUPABASE_URL = 'https://project.supabase.co/';
+  process.env.SUPABASE_ANON_KEY = 'public-test-key';
+  let request;
+  global.fetch = async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ id: '10000000-0000-4000-8000-000000000001' }) };
+  };
+  const user = await getSupabaseUser('signed-user-access-token'.repeat(4));
+  assert.equal(user.id, '10000000-0000-4000-8000-000000000001');
+  assert.equal(request.url, 'https://project.supabase.co/auth/v1/user');
+  assert.equal(request.options.headers.apikey, 'public-test-key');
+  assert.equal(request.options.headers.Authorization, `Bearer ${'signed-user-access-token'.repeat(4)}`);
+});
+
+test('room authentication rejects invalid tokens and requires Supabase configuration', async () => {
+  process.env.SUPABASE_URL = 'https://project.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'public-test-key';
+  global.fetch = async () => ({ ok: false, json: async () => ({ message: 'invalid token' }) });
+  assert.equal(await getSupabaseUser('x'.repeat(60)), null);
+  delete process.env.SUPABASE_URL;
+  assert.equal(await getSupabaseUser('x'.repeat(60)), null);
+  const denied = await authorizeRoomJoin('sala-private', '', '');
+  assert.equal(denied.user, null);
+  assert.equal(denied.authenticationRequired, true);
+});
+
+test('direct-call authorization checks the conversation through Supabase RLS context', async () => {
+  const conversationId = '20000000-0000-4000-8000-000000000002';
+  process.env.SUPABASE_URL = 'https://project.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'public-test-key';
+  let request;
+  global.fetch = async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => true };
+  };
+  assert.equal(await canJoinDirectConversation(conversationId, 'signed-user-access-token'.repeat(4)), true);
+  assert.equal(request.url, 'https://project.supabase.co/rest/v1/rpc/can_access_direct_conversation');
+  assert.deepEqual(JSON.parse(request.options.body), { p_conversation_id: conversationId });
+  assert.equal(await canJoinDirectConversation('invalid-id', 'signed-user-access-token'.repeat(4)), false);
+});
+
+test('room authorization rejects a private direct call when Supabase denies friendship access', async () => {
+  process.env.SUPABASE_URL = 'https://project.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'public-test-key';
+  global.fetch = async (url) => url.endsWith('/auth/v1/user')
+    ? { ok: true, json: async () => ({ id: '10000000-0000-4000-8000-000000000001' }) }
+    : { ok: true, json: async () => false };
+  const result = await authorizeRoomJoin('direct-20000000-0000-4000-8000-000000000002', '', 'signed-user-access-token'.repeat(4));
+  assert.equal(result.user.id, '10000000-0000-4000-8000-000000000001');
+  assert.equal(result.error, 'Esta chamada exige uma amizade e uma conversa direta ativas.');
+});
+
+test('TURN diagnostics report whether a relay key is configured without exposing it', () => {
+  process.env.CLOUDFLARE_TURN_KEY_ID = 'test-turn-id';
+  process.env.CLOUDFLARE_TURN_KEY_TOKEN = 'test-private-turn-token';
+  delete process.env.TURN_URLS;
+  delete process.env.TURN_SHARED_SECRET;
+  assert.equal(getTurnProvider(), 'cloudflare-configured');
+  assert.equal(JSON.stringify({ turn: getTurnProvider() }).includes(process.env.CLOUDFLARE_TURN_KEY_TOKEN), false);
+  delete process.env.CLOUDFLARE_TURN_KEY_ID;
+  delete process.env.CLOUDFLARE_TURN_KEY_TOKEN;
+  assert.equal(getTurnProvider(), 'stun-only');
 });

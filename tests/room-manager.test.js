@@ -23,6 +23,7 @@ test('two participants exchange WebRTC signaling and leave notifications', async
 
   assert.deepEqual(await manager.joinMemory(first, 'signaling-test'), { full: false });
   assert.deepEqual(await manager.joinMemory(second, 'signaling-test'), { full: false });
+  assert.equal(delivered.find(({ id, message }) => id === first.id && message.type === 'joined').message.turnAvailable, false);
   assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-joined' && message.peerId === second.id));
 
   const offer = { description: { type: 'offer', sdp: 'test-sdp' } };
@@ -32,4 +33,17 @@ test('two participants exchange WebRTC signaling and leave notifications', async
   await manager.leave(second);
   assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-left' && message.peerId === second.id));
   assert.equal(manager.memoryRooms.get('signaling-test').size, 1);
+});
+
+test('room signals that authenticated relay credentials are available', async () => {
+  const sent = [];
+  const manager = new RoomManager({
+    send: (client, message) => sent.push(message),
+    getIceServers: async () => [
+      { urls: 'stun:stun.example.test:3478' },
+      { urls: 'turns:turn.example.test:443', username: 'temporary', credential: 'short-lived' }
+    ]
+  });
+  await manager.joinMemory({ id: 'relay-test', room: null }, 'relay-test');
+  assert.equal(sent.find((message) => message.type === 'joined').turnAvailable, true);
 });

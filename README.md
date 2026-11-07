@@ -12,9 +12,9 @@ Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon
 4. Acesse `http://localhost:4173`.
 5. Use **Convidar pessoa** para enviar o link de uma sala direta.
 
-Salas diretas funcionam sem Redis e sem cadastro. Microfone, câmera e compartilhamento podem ser ativados mesmo quando a pessoa está sozinha; a transmissão fica pronta para participantes que entrarem depois. Para ativar contas, comunidades, mensagens de canais, lista de amigos e mensagens diretas, siga [CONFIGURACAO_SUPABASE.md](CONFIGURACAO_SUPABASE.md) e aplique as três migrações em ordem. `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
+É necessário entrar em uma conta antes de acessar salas, chamadas, comunidades, amigos ou mensagens. A página não entra em uma sala automaticamente: depois do login, a pessoa escolhe **Entrar na sala**. Uma sala direta pode ser iniciada por uma pessoa sozinha; o microfone, a câmera e o compartilhamento podem ser ativados depois e ficam disponíveis quando outras pessoas entram. Para ativar contas, comunidades, mensagens de canais, lista de amigos e mensagens diretas, siga [CONFIGURACAO_SUPABASE.md](CONFIGURACAO_SUPABASE.md) e aplique as quatro migrações em ordem. `GET /healthz` verifica se o processo está ativo; `GET /readyz` informa a prontidão, o backend de salas e se há configuração TURN no servidor.
 
-Os testes locais usam `node --test`. Os testes das políticas Postgres usam `supabase test db` e precisam de Supabase CLI e Docker.
+Os testes locais usam `npm test` (ou `node --test tests/server.test.js tests/room-manager.test.js tests/client-ui-contract.test.js`). Os testes das políticas Postgres usam `supabase test db` e precisam de Supabase CLI e Docker.
 
 ## Configuração de produção
 
@@ -44,7 +44,7 @@ Como alternativa, para habilitar TURN no Coturn, configure `use-auth-secret` e `
 
 ## Proteções incluídas
 
-- Salas novas usam tokens aleatórios de 128 bits gerados com Web Crypto. Cada sala aceita até 15 participantes e o servidor mantém compatibilidade com códigos antigos.
+- Salas novas usam tokens aleatórios de 128 bits gerados com Web Crypto. Cada sala aceita até 15 participantes. O servidor valida a sessão Supabase antes de admitir a pessoa e confirma no banco a associação para canais de voz e chamadas diretas.
 - Áudio, câmera, tela e mensagens usam conexões WebRTC diretas entre os navegadores. Com 15 pessoas, cada transmissão é enviada diretamente a cada participante; muitas câmeras ligadas ao mesmo tempo podem exigir bastante banda e processamento. Para chamadas de grupo com qualidade consistente, use um SFU, como LiveKit, em vez da malha direta.
 - O servidor valida a origem do WebSocket, limita conexões, tentativas de entrada e mensagens de sinalização, e rejeita frames acima de 1 MiB.
 - O processo envia heartbeats pelo WebSocket e renova a presença das salas no Redis.

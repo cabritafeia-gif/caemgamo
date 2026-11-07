@@ -5,7 +5,7 @@
   "description": "Salas de conversa com voz, vídeo e compartilhamento de tela",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test",
+    "test": "node --test tests/server.test.js tests/room-manager.test.js tests/client-ui-contract.test.js",
     "test:db": "supabase test db"
   },
   "dependencies": { "redis": "^5.0.0" }

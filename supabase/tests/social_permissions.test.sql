@@ -1,5 +1,5 @@
 begin;
-select plan(15);
+select plan(17);
 
 insert into auth.users(id, email, aud, role, encrypted_password, email_confirmed_at, raw_user_meta_data)
 values
@@ -55,9 +55,21 @@ select throws_ok(
 
 select set_config('request.jwt.claim.sub','91000000-0000-4000-8000-000000000001',true);
 select lives_ok($$update public.profiles set display_name='Pessoa A atualizada' where id=auth.uid()$$,'user can update their own profile');
+select lives_ok($$update public.profiles set username='pessoa_a_atualizada' where id=auth.uid()$$,'user can change their own friend handle');
+select is((select username from public.profiles where id=auth.uid()),'pessoa_a_atualizada','new public handle is saved');
+select set_config('request.jwt.claim.sub','91000000-0000-4000-8000-000000000002',true);
+select is(
+  (with changed as (update public.profiles set username='stolen_handle' where id='91000000-0000-4000-8000-000000000001' returning id) select count(*)::integer from changed),
+  0,
+  'another account cannot change a user handle'
+);
 reset role;
-select lives_ok($$update public.profiles set username='stolen_handle' where id='91000000-0000-4000-8000-000000000001'$$,'database trigger prevents handle changes even for privileged updates');
-select is((select username from public.profiles where id=auth.uid()),'pessoa_a_91000000','user cannot alter their immutable friend handle');
+select set_config('request.jwt.claim.sub','',true);
+select throws_ok(
+  $$update public.profiles set username='stolen_handle' where id='91000000-0000-4000-8000-000000000001'$$,
+  'P0001','profile handle can only be changed by its owner','privileged updates cannot impersonate a user handle change'
+);
+select is((select username from public.profiles where id='91000000-0000-4000-8000-000000000001'),'pessoa_a_atualizada','failed privileged update leaves the handle unchanged');
 
 select * from finish();
 rollback;

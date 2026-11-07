@@ -120,6 +120,7 @@
     $('profile-handle').textContent = state.profile?.username ? `@${state.profile.username}` : '—';
     $('allow-friend-requests').checked = state.profile?.allow_friend_requests !== false;
     if (signedIn && state.profile) {
+      $('profile-form').elements.username.value = state.profile.username || '';
       $('profile-form').elements.display_name.value = state.profile.display_name || '';
       $('settings-theme-select').value = state.profile.preferred_theme || 'dark';
       setAvatar(avatarUrl(state.profile.avatar_path), state.profile.display_name);
@@ -703,6 +704,19 @@
     status('Avatar atualizado.');
   }
 
+  async function removeAvatar() {
+    if (!state.session?.user || !state.profile?.avatar_path) return;
+    const previousPath = state.profile.avatar_path;
+    const { error } = await state.client.from('profiles').update({ avatar_path: null }).eq('id', state.session.user.id);
+    if (error) throw error;
+    await loadProfile();
+    if (!previousPath.startsWith('preset:')) {
+      const { error: deleteError } = await state.client.storage.from('avatars').remove([previousPath]);
+      if (deleteError) status('Avatar removido do perfil; o arquivo antigo não pôde ser apagado do armazenamento.', true);
+      else status('Avatar removido.');
+    } else status('Avatar removido.');
+  }
+
   async function changePresetAvatar(preset) {
     const allowed = ['fox','cat','owl','frog','star','heart','robot','flower'];
     if (!allowed.includes(preset) || !state.session?.user) return;
@@ -729,6 +743,7 @@
 
   function openAccount() {
     $('account-dialog').hidden = false;
+    $('account-close').hidden = !state.session?.user;
     if (state.session?.user) {
       $('auth-forms').hidden = true;
       $('profile-panel').hidden = false;
@@ -736,6 +751,7 @@
       showForm('sign-in-form');
     }
   }
+  window.CAEMGAMO_OPEN_ACCOUNT = openAccount;
 
   function requireAccount() {
     if (state.session?.user) return true;
@@ -1075,6 +1091,8 @@
 
   function friendlyError(error) {
     const text = String(error?.message || '');
+    if (/profiles_username_unique|duplicate key/i.test(text)) return 'Esse nome de usuário já está em uso. Escolha outro.';
+    if (/invalid profile handle/i.test(text)) return 'Use um identificador de 3 a 32 letras, números ou sublinhados, começando com letra ou número.';
     if (/message_rate_limited/i.test(text)) return 'Você enviou várias mensagens em pouco tempo. Aguarde alguns segundos.';
     if (/(community|invite|moderation)_rate_limited/i.test(text)) return 'Muitas ações em pouco tempo. Aguarde alguns minutos e tente de novo.';
     if (/duplicate key|already exists/i.test(text)) return 'Este nome já está em uso. Escolha outro.';
@@ -1117,8 +1135,8 @@
     $('call-dm-button').addEventListener('click', () => startDirectCall().catch((error) => socialStatus(friendlyError(error), 'messages-status', true)));
     $('direct-message-input').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('direct-message-form').requestSubmit(); } });
     $('home-server-button').addEventListener('click', () => location.assign('/'));
-    $('account-close').addEventListener('click', () => { $('account-dialog').hidden = true; });
-    $('account-dialog').addEventListener('click', (event) => { if (event.target === $('account-dialog')) $('account-dialog').hidden = true; });
+    $('account-close').addEventListener('click', () => { if (state.session?.user) $('account-dialog').hidden = true; });
+    $('account-dialog').addEventListener('click', (event) => { if (event.target === $('account-dialog') && state.session?.user) $('account-dialog').hidden = true; });
     $('chat-menu').addEventListener('click', () => {
       const menu = $('chat-menu-options');
       menu.hidden = !menu.hidden;
@@ -1161,7 +1179,7 @@
         $('chat-menu-options').hidden = true;
         $('chat-menu').setAttribute('aria-expanded', 'false');
         closeSocialViews();
-        $('account-dialog').hidden = true;
+        if (state.session?.user) $('account-dialog').hidden = true;
       }
     });
     $('show-sign-up').addEventListener('click', () => showForm('sign-up-form'));
@@ -1175,7 +1193,7 @@
         if (error) throw error;
         $('account-dialog').hidden = true;
         status('Login realizado.');
-        if (requestedChannel || !window.CAEMGAMO_IS_CALL_ACTIVE?.()) location.reload();
+        window.CAEMGAMO_ROOM_AUTH_CHANGED?.(true);
       } catch (error) { status(friendlyError(error), true); }
     }));
     $('sign-up-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
@@ -1214,10 +1232,12 @@
     }));
     $('profile-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
       const display_name = String(values.get('display_name')).trim();
+      const username = String(values.get('username')).trim().replace(/^@/, '').toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_]{2,31}$/.test(username)) { status('Use um identificador de 3 a 32 letras, números ou sublinhados, começando com letra ou número.', true); return; }
       try {
-        const { error } = await state.client.from('profiles').update({ display_name }).eq('id', state.session.user.id);
+        const { error } = await state.client.from('profiles').update({ display_name, username }).eq('id', state.session.user.id);
         if (error) throw error;
-        state.profile = { ...state.profile, display_name };
+        state.profile = { ...state.profile, username, display_name };
         state.profiles.set(state.session.user.id, { ...(state.profiles.get(state.session.user.id) || {}), ...state.profile });
         setAvatar(avatarUrl(state.profile.avatar_path), display_name);
         updateAccountView();
@@ -1242,6 +1262,7 @@
       catch (error) { status(friendlyError(error), true); }
       event.target.value = '';
     });
+    $('remove-avatar-button').addEventListener('click', () => removeAvatar().catch((error) => status(friendlyError(error), true)));
     $('profile-reset-password').addEventListener('click', async () => {
       await requestRecoveryCode(state.session.user.email);
     });
@@ -1254,7 +1275,7 @@
         window.CAEMGAMO_END_CALL?.();
         state.session = null;
         await settleAuth();
-        $('account-dialog').hidden = true;
+        openAccount();
         closeSocialViews();
         status('Você saiu da conta.');
         if (requestedChannel) location.replace('/');
@@ -1353,7 +1374,7 @@
         queueMicrotask(async () => {
           try {
             await settleAuth();
-            if (event === 'SIGNED_IN') window.CAEMGAMO_RECONNECT_CALL?.();
+            if (event === 'SIGNED_IN') $('account-dialog').hidden = true;
           } catch (authError) { status(friendlyError(authError), true); }
         });
       });
@@ -1411,6 +1432,7 @@
       if (!requestedChannel && !state.channel && state.communities.length === 0) {
         window.CaemgamoCommunity.canSend = false;
       }
+      window.CAEMGAMO_ROOM_AUTH_CHANGED?.(true);
     } else {
       if (state.subscription) await state.client.removeChannel(state.subscription);
       if (state.moderationSubscription) await state.client.removeChannel(state.moderationSubscription);
@@ -1450,7 +1472,23 @@
       $('profile-handle').textContent = '—';
       window.CAEMGAMO_SET_MEDIA_USER?.('');
       updateAccountView();
+      window.CAEMGAMO_ROOM_AUTH_CHANGED?.(false);
     }
     window.CAEMGAMO_UPDATE_CHAT_STATE?.();
   }
+
+  window.CAEMGAMO_FORCE_REAUTH = async () => {
+    try {
+      if (state.client) {
+        const { error } = await state.client.auth.signOut({ scope: 'local' });
+        if (error) throw error;
+      }
+      state.session = null;
+      await settleAuth();
+      openAccount();
+    } catch (error) {
+      openAccount();
+      status(friendlyError(error), true);
+    }
+  };
 })();
