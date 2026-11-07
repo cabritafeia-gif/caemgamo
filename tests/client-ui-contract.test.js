@@ -30,6 +30,17 @@ test('profile controls and account actions remain connected in the client', () =
   assert.match(community, /window\.CAEMGAMO_ROOM_AUTH_CHANGED\?\.\(true\)/);
 });
 
+test('opening the account dialog always restores the sign-in form when signed out', () => {
+  const showForm = community.slice(community.indexOf('function showForm('), community.indexOf('function setAvatar('));
+  const openAccount = community.slice(community.indexOf('function openAccount('), community.indexOf('window.CAEMGAMO_OPEN_ACCOUNT = openAccount'));
+  assert.match(showForm, /\$\('auth-forms'\)\.hidden = false/);
+  assert.match(showForm, /\$\('profile-panel'\)\.hidden = true/);
+  assert.match(openAccount, /const signedIn = Boolean\(state\.session\?\.user\)/);
+  assert.match(openAccount, /\$\('auth-forms'\)\.hidden = signedIn/);
+  assert.match(openAccount, /\$\('profile-panel'\)\.hidden = !signedIn/);
+  assert.match(openAccount, /showForm\('sign-in-form'\)/);
+});
+
 test('avatar controls have a visible fallback and refresh cached message profiles', () => {
   for (const id of ['profile-image', 'profile-initial', 'avatar-file', 'remove-avatar-button']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(community, /image\.onerror = \(\) =>/);

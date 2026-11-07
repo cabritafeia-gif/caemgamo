@@ -35,6 +35,7 @@
   }
 
   function showForm(name) {
+    $('auth-forms').hidden = false;
     for (const id of ['sign-in-form', 'sign-up-form', 'recovery-form', 'recovery-code-form', 'new-password-form']) $(id).hidden = id !== name;
     document.querySelectorAll('#auth-forms button[type="submit"]').forEach((button) => { button.disabled = !state.configured; });
     $('profile-panel').hidden = true;
@@ -742,11 +743,13 @@
   }
 
   function openAccount() {
+    const signedIn = Boolean(state.session?.user);
     $('account-dialog').hidden = false;
-    $('account-close').hidden = !state.session?.user;
-    if (state.session?.user) {
-      $('auth-forms').hidden = true;
-      $('profile-panel').hidden = false;
+    $('account-close').hidden = !signedIn;
+    $('auth-forms').hidden = signedIn;
+    $('profile-panel').hidden = !signedIn;
+    if (signedIn) {
+      updateAccountView();
     } else {
       showForm('sign-in-form');
     }
