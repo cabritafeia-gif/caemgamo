@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e1f22">
+  <meta name="description" content="Converse por texto, voz e vídeo. Compartilhe sua tela com seu grupo no CAEMGAMO.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="CAEMGAMO">
+  <title>CAEMGAMO — sala privada</title>
+  <link rel="manifest" href="/caemgamo.webmanifest">
+  <link rel="icon" href="/caemgamo-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/caemgamo-icon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/discord.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="CAEMGAMO, início">
+        <img class="brand-mark" src="/caemgamo-icon.svg" alt="">
+        <span class="brand-word">CAEMGAMO</span>
+      </a>
+      <div class="topbar-center">
+        <span class="live-dot" id="connection-dot"></span>
+        <span id="connection-label">Conectando à sala…</span>
+      </div>
+      <button class="icon-button install-button" id="install-button" hidden title="Instalar aplicativo" aria-label="Instalar aplicativo">⇩</button>
+      <button class="avatar" id="profile-button" title="Seu perfil">V</button>
+    </header>
+
+    <main class="layout">
+      <aside class="server-rail" aria-label="Navegação">
+        <div class="rail-logo"><img src="/caemgamo-icon.svg" alt="CAEMGAMO"></div>
+        <div class="rail-divider"></div>
+        <div class="server-icon active-server" title="CAEMGAMO">C</div>
+        <div class="server-icon add-server" title="Adicionar sala">+</div>
+        <div class="rail-spacer"></div>
+        <div class="rail-user-avatar">V</div>
+      </aside>
+
+      <aside class="sidebar">
+        <div class="workspace-heading"><span>CAEMGAMO</span><span class="workspace-chevron">⌄</span></div>
+        <div class="side-title">CANAIS DE VOZ</div>
+        <div class="room-card">
+          <span class="room-icon">♫</span>
+          <div class="room-meta"><strong>Sala privada</strong><span id="room-code-side">gerando código…</span></div>
+          <span class="lock-icon" aria-label="Privada">⌑</span>
+        </div>
+        <button class="invite-button" id="copy-invite"><span>＋</span> Convidar pessoa</button>
+
+        <div class="side-divider"></div>
+        <div class="side-title people-heading">PARTICIPANTES <span class="count-badge" id="people-count">1</span></div>
+        <div class="person-row"><span class="person-avatar self-avatar">V</span><span class="person-name">Você</span><span class="self-tag">você</span></div>
+        <div class="person-row" id="guest-person" hidden><span class="person-avatar guest-avatar">?</span><span class="person-name">Convidado</span><span class="person-status"></span></div>
+
+        <div class="sidebar-note"><span class="note-spark">✦</span><div><strong>Convide seu grupo</strong><p>Compartilhe a sala para conversar, jogar ou mostrar sua tela.</p></div></div>
+        <div class="sidebar-bottom"><span class="secure-icon">◈</span> Conexão ponto a ponto</div>
+      </aside>
+
+      <section class="main-column">
+        <div class="room-header">
+          <div><div class="eyebrow">CANAL DE VOZ</div><h1><span class="voice-heading-icon">♫</span> sala privada</h1></div>
+          <button class="secondary-button" id="copy-code"><span>↗</span> <span id="copy-code-label">Convidar</span></button>
+        </div>
+
+        <section class="stage" id="stage">
+          <video id="remote-video" autoplay playsinline></video>
+          <div class="stage-placeholder" id="stage-placeholder">
+            <div class="stage-orbit orbit-one"></div><div class="stage-orbit orbit-two"></div>
+            <div class="stage-logo"><img class="brand-mark" src="/caemgamo-icon.svg" alt="CAEMGAMO"></div>
+            <div class="stage-copy"><strong id="stage-title">A sala está pronta</strong><span id="stage-subtitle">Convide alguém para começar a conversa</span></div>
+            <div class="stage-people"><span class="stage-avatar me-avatar">V</span><span class="stage-avatar waiting-avatar" id="waiting-avatar">+</span></div>
+            <div class="stage-hint" id="stage-hint">Aguardando alguém entrar</div>
+          </div>
+          <div class="screen-label" id="screen-label" hidden><span class="screen-live"></span> Tela compartilhada</div>
+          <video class="local-preview" id="local-video" autoplay muted playsinline hidden></video>
+          <div class="call-clock" id="call-clock" hidden>00:00</div>
+        </section>
+
+        <section class="controls-area">
+          <div class="controls-row">
+            <button class="control-button" id="mic-button" disabled><span class="control-icon">♩</span><span>Microfone</span></button>
+            <button class="control-button" id="camera-button" disabled><span class="control-icon">▣</span><span>Câmera</span></button>
+            <button class="control-button share-control" id="share-button" disabled><span class="control-icon">▱</span><span>Compartilhar tela</span></button>
+            <button class="control-button leave-control" id="leave-button" disabled><span class="control-icon">×</span><span>Sair</span></button>
+          </div>
+          <p class="control-caption" id="control-caption">Entre na sala para ativar áudio, vídeo e compartilhamento.</p>
+        </section>
+      </section>
+
+      <aside class="chat-panel">
+        <div class="chat-header"><div><h2>Bate-papo</h2><span>Mensagens da sala</span></div><button class="icon-button chat-menu" id="chat-menu" aria-label="Opções da conversa">···</button></div>
+        <div class="chat-body" id="chat-body">
+          <div class="day-divider"><span>HOJE</span></div>
+          <div class="welcome-message"><div class="welcome-icon">✦</div><strong>Bem-vindo ao CAEMGAMO</strong><p>As mensagens da sala aparecem aqui.</p></div>
+          <div class="system-message" id="system-message">Seu convite está pronto. Envie o link para alguém participar.</div>
+        </div>
+        <form class="message-form" id="message-form">
+          <label class="sr-only" for="message-input">Escreva uma mensagem</label>
+          <textarea id="message-input" rows="1" maxlength="1000" placeholder="Escreva uma mensagem…" disabled></textarea>
+          <div class="composer-bottom"><span class="composer-tip">Enter para enviar · Shift + Enter para quebrar linha</span><button class="send-button" id="send-button" type="submit" disabled aria-label="Enviar mensagem">↑</button></div>
+        </form>
+        <div class="chat-footnote"><span>◈</span> As mensagens são enviadas diretamente entre participantes.</div>
+      </aside>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="mobile-tabs"><button class="mobile-tab selected" data-tab="room">Sala</button><button class="mobile-tab" data-tab="chat">Mensagens <span id="unread-count" hidden>0</span></button></div>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

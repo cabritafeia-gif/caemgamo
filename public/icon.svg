@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CAEMGAMO">
+  <defs>
+    <linearGradient id="caemgamo" x1="8" y1="5" x2="58" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8b7cff"/>
+      <stop offset=".52" stop-color="#6568f4"/>
+      <stop offset="1" stop-color="#36c5cf"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="22" y1="32" x2="43" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#655be8"/><stop offset="1" stop-color="#2dabbc"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="20" fill="url(#caemgamo)"/>
+  <path d="M15 22.5c0-5 4-9 9-9h19c5 0 9 4 9 9v15c0 5-4 9-9 9H31l-11 7v-9.1a9 9 0 0 1-5-8.1V22.5Z" fill="#fff"/>
+  <path d="M24 33v-5m8 11V24m8 9v-5" stroke="url(#wave)" stroke-width="4" stroke-linecap="round"/>
+  <path d="m47.5 9 .9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9.9-2.4Z" fill="#fff" fill-opacity=".9"/>
+</svg>
