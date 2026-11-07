@@ -76,7 +76,7 @@
     $('profile-button').title = signedIn ? 'Seu perfil' : 'Entrar ou criar conta';
     $('workspace-name').textContent = state.communities.find((item) => item.id === state.communityId)?.name || 'CAEMGAMO';
     for (const id of ['create-community-button', 'join-community-button', 'explore-community-button', 'add-community-button']) $(id).disabled = !state.configured || !signedIn;
-    for (const id of ['create-channel-button', 'create-invite-button', 'revoke-invite-button', 'manage-members-button', 'edit-community-button', 'community-icon-button', 'leave-community-button']) $(id).disabled = !state.configured || !signedIn || !state.communityId;
+    for (const id of ['create-channel-button', 'create-invite-button', 'revoke-invite-button', 'manage-members-button', 'view-audit-button', 'edit-community-button', 'community-icon-button', 'leave-community-button']) $(id).disabled = !state.configured || !signedIn || !state.communityId;
     if (signedIn && state.profile) {
       $('profile-form').elements.display_name.value = state.profile.display_name || '';
       $('profile-form').elements.theme.value = state.profile.preferred_theme || 'dark';
@@ -470,6 +470,21 @@
     await loadCommunities(state.communityId);
   }
 
+  async function viewAudit() {
+    if (!requireAccount() || !state.communityId) return;
+    const { data, error } = await state.client.from('audit_logs').select('actor_id,subject_id,action,reason,created_at').eq('community_id', state.communityId).order('created_at', { ascending: false }).limit(20);
+    if (error) throw error;
+    const ids = (data || []).flatMap((row) => [row.actor_id, row.subject_id].filter(Boolean));
+    await loadAuthors(ids);
+    const lines = (data || []).map((row) => {
+      const actor = state.profiles.get(row.actor_id)?.display_name || 'Participante';
+      const subject = row.subject_id ? ` → ${state.profiles.get(row.subject_id)?.display_name || 'Participante'}` : '';
+      const reason = row.reason ? ` · ${row.reason}` : '';
+      return `${new Date(row.created_at).toLocaleString('pt-BR')} · ${actor}${subject} · ${row.action}${reason}`;
+    });
+    alert(lines.join('\n') || 'Nenhum evento registrado.');
+  }
+
   async function changeAvatar(file) {
     if (!file || !state.session?.user) return;
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Escolha PNG, JPEG ou WebP com até 5 MB.');
@@ -523,6 +538,7 @@
   function friendlyError(error) {
     const text = String(error?.message || '');
     if (/message_rate_limited/i.test(text)) return 'Você enviou várias mensagens em pouco tempo. Aguarde alguns segundos.';
+    if (/(community|invite|moderation)_rate_limited/i.test(text)) return 'Muitas ações em pouco tempo. Aguarde alguns minutos e tente de novo.';
     if (/duplicate key|already exists/i.test(text)) return 'Este nome já está em uso. Escolha outro.';
     if (/permission|row-level|policy|not permitted|insufficient/i.test(text)) return 'Sua conta não tem permissão para esta ação.';
     if (/fetch|network|timeout/i.test(text)) return 'Sem conexão com o serviço. Tente novamente.';
@@ -618,6 +634,7 @@
     $('create-channel-button').addEventListener('click', () => createChannel().catch((error) => status(friendlyError(error), true)));
     $('create-invite-button').addEventListener('click', () => createInvite().catch((error) => status(friendlyError(error), true)));
     $('manage-members-button').addEventListener('click', () => manageMembers().catch((error) => status(friendlyError(error), true)));
+    $('view-audit-button').addEventListener('click', () => viewAudit().catch((error) => status(friendlyError(error), true)));
     $('revoke-invite-button').addEventListener('click', () => revokeInvite().catch((error) => status(friendlyError(error), true)));
     $('edit-community-button').addEventListener('click', () => editCommunity().catch((error) => status(friendlyError(error), true)));
     $('community-icon-button').addEventListener('click', () => $('community-icon-file').click());
@@ -704,7 +721,14 @@
       await loadCommunities(state.communityId || savedCommunity);
       let pendingInvite = '';
       try { pendingInvite = sessionStorage.getItem('caemgamo-pending-invite') || inviteToken; } catch { pendingInvite = inviteToken; }
-      if (pendingInvite) await joinInvite(pendingInvite);
+      if (pendingInvite) {
+        try { await joinInvite(pendingInvite); }
+        catch (error) {
+          try { sessionStorage.removeItem('caemgamo-pending-invite'); } catch { /* armazenamento opcional */ }
+          history.replaceState({}, '', location.pathname + location.search);
+          status(friendlyError(error), true);
+        }
+      }
       if (!requestedChannel && !state.channel && state.communities.length === 0) {
         window.CaemgamoCommunity.canSend = false;
       }

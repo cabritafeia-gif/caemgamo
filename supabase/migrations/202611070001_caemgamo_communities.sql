@@ -218,6 +218,8 @@ returns uuid language plpgsql security definer set search_path = '' as $$
 declare new_id uuid;
 begin
   if auth.uid() is null then raise exception 'authentication required'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(auth.uid()::text, 0));
+  if (select count(*) from public.communities where owner_id = auth.uid() and created_at > now() - interval '1 hour') >= 3 then raise exception 'community_rate_limited'; end if;
   insert into public.communities(name, description, is_public, rules, owner_id)
   values (trim(p_name), coalesce(p_description, ''), coalesce(p_is_public, false), coalesce(p_rules, ''), auth.uid())
   returning id into new_id;
@@ -252,6 +254,8 @@ begin
   if p_max_uses is not null and p_max_uses < 1 then raise exception 'invalid use limit'; end if;
   actor_role := public.member_role(p_community_id);
   if actor_role is null or public.community_role_rank(actor_role) < 2 then raise exception 'insufficient permission'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(p_community_id::text, 0));
+  if (select count(*) from public.community_invites where community_id = p_community_id and created_by = auth.uid() and created_at > now() - interval '1 hour') >= 30 then raise exception 'invite_rate_limited'; end if;
   insert into public.community_invites(community_id, token_hash, created_by, expires_at, max_uses)
   values (p_community_id, extensions.digest(p_token, 'sha256'), auth.uid(), p_expires_at, p_max_uses)
   returning id into invite_id;
@@ -292,10 +296,14 @@ $$;
 
 create or replace function public.join_community_by_invite(p_token text)
 returns uuid language plpgsql security definer set search_path = 'public, extensions' as $$
-declare invite_row public.community_invites%rowtype;
+declare invite_row public.community_invites%rowtype; existing_community uuid;
 begin
   if auth.uid() is null then raise exception 'authentication required'; end if;
   if char_length(p_token) < 32 or char_length(p_token) > 160 then raise exception 'invalid invite'; end if;
+  select ci.community_id into existing_community
+  from public.community_invites ci join public.community_members cm on cm.community_id = ci.community_id
+  where ci.token_hash = extensions.digest(p_token, 'sha256') and cm.user_id = auth.uid();
+  if found then return existing_community; end if;
   update public.community_invites ci set use_count = use_count + 1
   where ci.token_hash = extensions.digest(p_token, 'sha256')
     and ci.revoked_at is null and (ci.expires_at is null or ci.expires_at > now())
@@ -305,8 +313,10 @@ begin
   if public.is_community_banned(invite_row.community_id, auth.uid()) or public.is_community_kicked(invite_row.community_id, auth.uid()) then raise exception 'not permitted'; end if;
   insert into public.community_members(community_id, user_id, role)
   values (invite_row.community_id, auth.uid(), 'member') on conflict (community_id, user_id) do nothing;
-  insert into public.audit_logs(community_id, actor_id, action, details)
-  values (invite_row.community_id, auth.uid(), 'member_joined', jsonb_build_object('invite_id', invite_row.id));
+  if found then
+    insert into public.audit_logs(community_id, actor_id, action, details)
+    values (invite_row.community_id, auth.uid(), 'member_joined', jsonb_build_object('invite_id', invite_row.id));
+  end if;
   return invite_row.community_id;
 end;
 $$;
@@ -318,7 +328,7 @@ begin
   if not exists (select 1 from public.communities where id = p_community_id and is_public) then raise exception 'community unavailable'; end if;
   if public.is_community_banned(p_community_id, auth.uid()) or public.is_community_kicked(p_community_id, auth.uid()) then raise exception 'not permitted'; end if;
   insert into public.community_members(community_id, user_id, role) values(p_community_id, auth.uid(), 'member') on conflict do nothing;
-  insert into public.audit_logs(community_id, actor_id, action) values(p_community_id, auth.uid(), 'member_joined_public');
+  if found then insert into public.audit_logs(community_id, actor_id, action) values(p_community_id, auth.uid(), 'member_joined_public'); end if;
   return p_community_id;
 end;
 $$;
@@ -346,6 +356,8 @@ begin
   select cm.role into target_role from public.community_members cm where cm.community_id = p_community_id and cm.user_id = p_user_id for update;
   if actor_role is null or target_role is null or public.community_role_rank(actor_role) < 2 then raise exception 'insufficient permission'; end if;
   if p_user_id = auth.uid() or public.community_role_rank(actor_role) <= public.community_role_rank(target_role) then raise exception 'cannot moderate equal or higher role'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(auth.uid()::text || ':' || p_community_id::text, 0));
+  if (select count(*) from public.moderation_cases where community_id = p_community_id and actor_id = auth.uid() and created_at > now() - interval '10 minutes') >= 30 then raise exception 'moderation_rate_limited'; end if;
   if p_action in ('mute', 'kick', 'ban') and p_duration_seconds is not null and (p_duration_seconds < 60 or p_duration_seconds > 31536000) then raise exception 'invalid duration'; end if;
   if p_action in ('mute', 'kick', 'ban') and p_duration_seconds is null and p_action <> 'ban' then raise exception 'duration required'; end if;
   expiry := case when p_duration_seconds is null then null else now() + make_interval(secs => p_duration_seconds) end;
