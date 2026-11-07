@@ -57,6 +57,10 @@ test('voice controls expose recovery for blocked playback and ICE reconnection',
   assert.match(app, /NotAllowedError/);
   assert.match(app, /function scheduleIceRestart\(/);
   assert.match(app, /createOffer\(iceRestart \? \{ iceRestart: true \} : undefined\)/);
+  assert.match(app, /peer\.connectionTimer = setTimeout\([\s\S]*?15_000\)/);
+  assert.match(app, /clearTimeout\(peer\.connectionTimer\)/);
+  assert.match(app, /ui\.systemMessage\.textContent = `Falha na chamada: \$\{reason\}`/);
+  assert.match(app, /peer\.ui\.status\.textContent = 'Não conectou · confira a rede e tente entrar novamente'/);
   assert.match(app, /type: 'media-state'/);
   assert.match(app, /data\.type === 'media-state'/);
   assert.match(app, /setAttribute\('aria-pressed', String\(active\)\)/);

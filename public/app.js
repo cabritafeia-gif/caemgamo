@@ -426,7 +426,7 @@ function createPeerTile(peerId) {
   const status = document.createElement('span');
   status.className = 'media-status';
   status.setAttribute('aria-live', 'polite');
-  status.textContent = 'Conectando mídia…';
+  status.textContent = 'Aguardando conexão…';
   tile.append(avatar, video, audio, label, status);
   ui.mediaGrid.append(tile);
   return { tile, avatar, video, audio, label, status };
@@ -444,9 +444,13 @@ function updatePeerTile(peer) {
     ? `${state.audio ? '🎙 Microfone ligado' : '🔇 Microfone desligado'} · ${state.sharing ? '▣ Transmitindo tela' : state.video ? '▣ Câmera ligada' : 'Câmera desligada'}`
     : peer.pc.connectionState === 'connected'
       ? 'Mídia conectada · aguardando controles'
-      : ['failed', 'disconnected'].includes(peer.pc.connectionState)
-        ? 'Conexão de mídia interrompida · verificando a rede'
-        : 'Conectando áudio e vídeo…';
+      : peer.pc.connectionState === 'failed' || peer.pc.iceConnectionState === 'failed'
+        ? 'Falha na conexão · confira a rede e o relay TURN'
+        : peer.pc.connectionState === 'disconnected' || peer.pc.iceConnectionState === 'disconnected'
+          ? 'Conexão interrompida · tentando novamente…'
+          : peer.pc.iceConnectionState === 'checking'
+            ? 'Verificando conexão de rede…'
+            : 'Conectando áudio e vídeo…';
   peer.ui.video.play().catch(() => {});
   playPeerAudio(peer);
 }
@@ -508,7 +512,7 @@ function ensurePeer(peerId, initiator = false) {
     id: peerId, pc, senders: { audio: audioSender, video: videoSender },
     channel: null, pendingCandidates: [], remoteStream: new MediaStream(), ui: createPeerTile(peerId),
     polite: clientId > peerId, makingOffer: false, ignoreOffer: false, mediaState: null,
-    iceRestarts: 0, iceRestartTimer: null, closed: false
+    iceRestarts: 0, iceRestartTimer: null, connectionTimer: null, closed: false
   };
   peers.set(peerId, peer);
   updatePeerTile(peer);
@@ -533,6 +537,8 @@ function ensurePeer(peerId, initiator = false) {
     }
     if (pc.connectionState === 'connected' && roomJoined) setConnection(`Na sala · ${participants.size + 1} participantes`, 'connected');
     if (pc.connectionState === 'connected') {
+      clearTimeout(peer.connectionTimer);
+      peer.connectionTimer = null;
       peer.iceRestarts = 0;
       clearTimeout(peer.iceRestartTimer);
       peer.iceRestartTimer = null;
@@ -549,6 +555,13 @@ function ensurePeer(peerId, initiator = false) {
       peer.iceRestartTimer = null;
     }
   };
+  peer.connectionTimer = setTimeout(() => {
+    peer.connectionTimer = null;
+    if (peer.closed || peer.pc.connectionState === 'connected') return;
+    peer.ui.status.textContent = 'A conexão está demorando · tentando novamente…';
+    ui.systemMessage.textContent = 'A conexão de áudio e vídeo está demorando. O app está tentando outra negociação de rede; se falhar, confira a rede e tente sair e entrar novamente.';
+    scheduleIceRestart(peer, true);
+  }, 15_000);
   syncPeerTracks(peer).catch(() => {});
   if (initiator) startOffer(peer).catch((error) => showToast(`Falha ao iniciar conexão: ${error.message}`));
   updateStage();
@@ -588,6 +601,8 @@ function scheduleIceRestart(peer, immediate = false) {
   if (peer.closed || peer.iceRestartTimer) return;
   if (clientId > peer.id) return;
   if (peer.iceRestarts >= 3) {
+    peer.ui.status.textContent = 'Não conectou · confira a rede e tente entrar novamente';
+    ui.systemMessage.textContent = 'Não foi possível estabelecer áudio e vídeo. Confira a conexão com a internet e tente sair e entrar novamente. Se continuar, a rede pode estar bloqueando WebRTC/TURN.';
     setConnection('Mídia interrompida · verifique a rede e tente novamente', 'error');
     showToast('A conexão de áudio e vídeo foi interrompida. Saia e entre novamente na sala.');
     return;
@@ -647,6 +662,7 @@ function closePeer(peerId) {
   if (!peer) return;
   peer.closed = true;
   clearTimeout(peer.iceRestartTimer);
+  clearTimeout(peer.connectionTimer);
   audioBlockedPeers.delete(peerId);
   updateAudioUnlockButton();
   peer.channel?.close();
@@ -726,24 +742,33 @@ function connect() {
       try { await handleSignal(String(message.from || ''), message.data); }
       catch (error) { showToast(`Falha ao conectar: ${error.message}`); }
     } else if (message.type === 'error') {
+      const reason = String(message.message || 'O servidor recusou a entrada na chamada.');
       setConnection('Não foi possível entrar', 'error');
-      showToast(message.message || 'Erro ao entrar na sala.');
-      if (/sessão expirou|entre na sua conta/i.test(message.message || '')) {
+      ui.systemMessage.textContent = `Falha na chamada: ${reason}`;
+      showToast(reason);
+      if (/sessão expirou|entre na sua conta/i.test(reason)) {
         intentionalLeave = true;
         endCurrentCall();
+        setConnection('Sessão encerrada · entre novamente', 'error');
+        ui.systemMessage.textContent = `A chamada foi encerrada: ${reason}`;
         window.CAEMGAMO_FORCE_REAUTH?.();
         return;
       }
-      if (/acesso.*encerrado/i.test(message.message || '')) {
+      if (/acesso.*encerrado/i.test(reason)) {
         intentionalLeave = true;
         endCurrentCall();
+        setConnection('Acesso à chamada encerrado', 'error');
+        ui.systemMessage.textContent = `A chamada foi encerrada: ${reason}`;
         return;
       }
-      if (!roomJoined) {
-        intentionalLeave = true;
+      intentionalLeave = true;
+      if (roomJoined) endCurrentCall();
+      else {
         updateParticipants();
         socket.close();
       }
+      setConnection('Falha ao entrar · tente novamente', 'error');
+      ui.systemMessage.textContent = `Falha na chamada: ${reason}`;
     }
   });
   socket.addEventListener('close', () => {
