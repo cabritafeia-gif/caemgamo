@@ -110,9 +110,9 @@ async function getIceServers(clientId) {
   const iceServers = urls.map((url) => ({ urls: url }));
 
   const cloudflareKeyId = (process.env.CLOUDFLARE_TURN_KEY_ID || '').trim();
-  const cloudflareApiToken = (process.env.CLOUDFLARE_TURN_API_TOKEN || '').trim();
-  if (cloudflareKeyId || cloudflareApiToken) {
-    if (!cloudflareKeyId || !cloudflareApiToken) {
+  const cloudflareKeyToken = (process.env.CLOUDFLARE_TURN_KEY_TOKEN || '').trim();
+  if (cloudflareKeyId || cloudflareKeyToken) {
+    if (!cloudflareKeyId || !cloudflareKeyToken) {
       console.warn('Cloudflare TURN está incompleto; esta sala usará somente STUN.');
       return iceServers;
     }
@@ -124,7 +124,7 @@ async function getIceServers(clientId) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${cloudflareApiToken}`,
+          Authorization: `Bearer ${cloudflareKeyToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ ttl }),

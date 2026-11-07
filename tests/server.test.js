@@ -7,7 +7,7 @@ const originalFetch = global.fetch;
 const originalUrl = process.env.SUPABASE_URL;
 const originalKey = process.env.SUPABASE_ANON_KEY;
 const originalTurnEnv = Object.fromEntries([
-  'CLOUDFLARE_TURN_KEY_ID', 'CLOUDFLARE_TURN_API_TOKEN', 'CLOUDFLARE_TURN_TTL_SECONDS',
+  'CLOUDFLARE_TURN_KEY_ID', 'CLOUDFLARE_TURN_KEY_TOKEN', 'CLOUDFLARE_TURN_TTL_SECONDS',
   'TURN_URLS', 'TURN_SHARED_SECRET', 'TURN_TTL_SECONDS', 'STUN_URLS'
 ].map((key) => [key, process.env[key]]));
 
@@ -41,7 +41,7 @@ test.after(() => {
 
 test('Cloudflare TURN credentials are fetched server-side and passed as ICE servers', async () => {
   process.env.CLOUDFLARE_TURN_KEY_ID = 'turn-key-id';
-  process.env.CLOUDFLARE_TURN_API_TOKEN = 'private-api-token';
+  process.env.CLOUDFLARE_TURN_KEY_TOKEN = 'private-turn-key-token';
   delete process.env.CLOUDFLARE_TURN_TTL_SECONDS;
   delete process.env.TURN_URLS;
   delete process.env.TURN_SHARED_SECRET;
@@ -61,15 +61,15 @@ test('Cloudflare TURN credentials are fetched server-side and passed as ICE serv
   const iceServers = await getIceServers('test-client');
   assert.equal(request.url, 'https://rtc.live.cloudflare.com/v1/turn/keys/turn-key-id/credentials/generate-ice-servers');
   assert.equal(request.options.method, 'POST');
-  assert.equal(request.options.headers.Authorization, 'Bearer private-api-token');
+  assert.equal(request.options.headers.Authorization, 'Bearer private-turn-key-token');
   assert.deepEqual(JSON.parse(request.options.body), { ttl: 172800 });
   assert.ok(iceServers.some((entry) => entry.username === 'short-lived-user' && entry.credential === 'short-lived-password'));
-  assert.equal(JSON.stringify(iceServers).includes('private-api-token'), false);
+  assert.equal(JSON.stringify(iceServers).includes('private-turn-key-token'), false);
 });
 
 test('Cloudflare TURN TTL is clamped to the documented 48-hour maximum', async () => {
   process.env.CLOUDFLARE_TURN_KEY_ID = 'turn-key-id';
-  process.env.CLOUDFLARE_TURN_API_TOKEN = 'private-api-token';
+  process.env.CLOUDFLARE_TURN_KEY_TOKEN = 'private-turn-key-token';
   process.env.CLOUDFLARE_TURN_TTL_SECONDS = '999999';
   let requestBody;
   global.fetch = async (_url, options) => {

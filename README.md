@@ -28,7 +28,7 @@ Configure as variáveis no serviço de hospedagem, usando um gerenciador de segr
 | `TRUST_PROXY_HEADERS` | Use `true` somente quando a origem dos pedidos for um proxy confiável, como um ALB privado. Permite usar o último endereço de `X-Forwarded-For` para limitar requisições por IP. |
 | `STUN_URLS` | Servidores STUN separados por vírgula. O padrão é `stun:stun.l.google.com:19302`. |
 | `CLOUDFLARE_TURN_KEY_ID` | ID da chave TURN criada no painel da Cloudflare. |
-| `CLOUDFLARE_TURN_API_TOKEN` | Token privado autorizado a emitir credenciais TURN temporárias. Mantenha-o apenas no backend. |
+| `CLOUDFLARE_TURN_KEY_TOKEN` | Token Bearer privado retornado ao criar a chave TURN. Não é o token geral da conta; mantenha-o apenas no backend. |
 | `CLOUDFLARE_TURN_TTL_SECONDS` | Validade das credenciais temporárias, limitada a 172.800 segundos (48 horas); esse é o padrão. |
 | `TURN_URLS` | Endereços TURN separados por vírgula, se usar Coturn em vez da Cloudflare. |
 | `TURN_SHARED_SECRET` | Segredo compartilhado com Coturn para emitir credenciais TURN temporárias. Nunca coloque esse segredo no navegador. |
@@ -38,7 +38,7 @@ Configure as variáveis no serviço de hospedagem, usando um gerenciador de segr
 
 O cliente Redis usa Pub/Sub para encaminhar sinalização entre processos e um hash com expiração para registrar participantes. O Pub/Sub não guarda mensagens para assinantes que estavam desconectados; se o servidor ou a região cair, os usuários reconectam e renegociam a chamada. [Documentação do node-redis](https://redis.io/docs/latest/develop/use-cases/pub-sub/nodejs/).
 
-Com `CLOUDFLARE_TURN_KEY_ID` e `CLOUDFLARE_TURN_API_TOKEN` configurados, o backend solicita à Cloudflare credenciais temporárias quando uma pessoa entra na sala e envia ao navegador somente os ICE servers e as credenciais de curta duração. O token API de longa duração nunca é enviado ao cliente. Se o serviço Cloudflare estiver indisponível, o app registra um aviso e mantém STUN como alternativa; algumas redes restritivas podem então não conseguir completar chamadas. A Cloudflare documenta TTL máximo de 48 horas e geração das credenciais no backend em [Generate TURN credentials](https://developers.cloudflare.com/realtime/turn/generate-credentials/).
+Com `CLOUDFLARE_TURN_KEY_ID` (`uid`) e `CLOUDFLARE_TURN_KEY_TOKEN` (`key`) configurados, o backend solicita à Cloudflare credenciais temporárias quando uma pessoa entra na sala e envia ao navegador somente os ICE servers e as credenciais de curta duração. O token da chave TURN nunca é enviado ao cliente. Se o serviço Cloudflare estiver indisponível, o app registra um aviso e mantém STUN como alternativa; algumas redes restritivas podem então não conseguir completar chamadas. A Cloudflare documenta TTL máximo de 48 horas e geração das credenciais no backend em [Generate TURN credentials](https://developers.cloudflare.com/realtime/turn/generate-credentials/).
 
 Como alternativa, para habilitar TURN no Coturn, configure `use-auth-secret` e `static-auth-secret` com o mesmo segredo usado em `TURN_SHARED_SECRET`. O servidor gera usuário com expiração e senha HMAC-SHA1; o navegador recebe somente as credenciais temporárias. Configure cotas de alocação e banda no Coturn para limitar abuso e custos. [Documentação REST do Coturn](https://github.com/coturn/coturn/blob/master/README.turnserver).
 
