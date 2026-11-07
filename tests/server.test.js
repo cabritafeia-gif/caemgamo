@@ -15,6 +15,7 @@ test('HTTP app serves the shell, public config, and security headers', async () 
     const address = server.address();
     const root = await originalFetch(`http://127.0.0.1:${address.port}/`);
     assert.equal(root.status, 200);
+    assert.equal(root.headers.get('cache-control'), 'no-cache');
     assert.match(root.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     await root.text();
     const config = await originalFetch(`http://127.0.0.1:${address.port}/config.json`);
