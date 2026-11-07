@@ -235,22 +235,46 @@
     </div>
   </section>
   <section class="social-backdrop" id="friends-dialog" hidden aria-modal="true" role="dialog" aria-labelledby="friends-title">
-    <div class="social-dialog">
-      <button class="dialog-close" id="friends-close" type="button" aria-label="Fechar">×</button>
-      <h2 id="friends-title">Amigos</h2>
-      <nav class="friends-tabs" aria-label="Lista de amigos">
-        <button type="button" data-friends-tab="all" aria-current="page">Todos</button>
-        <button type="button" data-friends-tab="pending">Pendentes <span id="pending-friend-count" hidden>0</span></button>
-        <button type="button" data-friends-tab="add">Adicionar amigo</button>
-      </nav>
-      <section data-friends-section="all"><div id="friend-list" class="social-list" aria-live="polite"></div></section>
-      <section data-friends-section="pending" hidden><div id="pending-friend-list" class="social-list" aria-live="polite"></div></section>
-      <section data-friends-section="add" hidden>
-        <p class="settings-summary">Procure pelo identificador completo mostrado no perfil (exemplo: nome_12ab34cd).</p>
-        <form id="friend-search-form" class="friend-search-form"><label for="friend-username">Identificador do amigo</label><div><input id="friend-username" name="username" maxlength="64" autocomplete="off" required><button class="primary-action" type="submit">Buscar</button></div></form>
-        <div id="friend-search-result" class="social-list" aria-live="polite"></div>
-      </section>
-      <p id="friends-status" class="account-status" role="status" aria-live="polite"></p>
+    <div class="social-dialog friends-workspace">
+      <aside class="friends-sidebar" aria-label="Navegação de amigos">
+        <button class="friends-start-conversation" id="friends-start-conversation" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5M8 10h5M10.5 7.5v5"></path></svg><span>Encontre ou comece uma conversa</span></button>
+        <nav class="friends-primary-nav" aria-label="Amizades e mensagens">
+          <button type="button" id="friends-sidebar-home" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM16 4.5a3.5 3.5 0 0 1 0 6.8M17 14.7a4 4 0 0 1 4 4V20"></path></svg><span>Amigos</span></button>
+          <button type="button" id="friends-sidebar-requests"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"></rect><path d="m4 7 8 6 8-6"></path></svg><span>Solicitações</span><span id="friends-sidebar-request-count" class="friends-nav-count" hidden>0</span></button>
+        </nav>
+        <div class="friends-dm-heading"><span>Mensagens diretas</span><button type="button" id="friends-add-direct" title="Adicionar amigo" aria-label="Adicionar amigo">＋</button></div>
+        <div id="friends-direct-list" class="friends-direct-list" aria-label="Seus amigos e conversas"></div>
+        <div class="friends-sidebar-footer"><img src="/caemgamo-icon.svg" alt=""><span>CAEMGAMO</span></div>
+      </aside>
+
+      <main class="friends-main">
+        <header class="friends-main-header">
+          <div class="friends-title-wrap"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM16 4.5a3.5 3.5 0 0 1 0 6.8"></path></svg><h2 id="friends-title">Amigos</h2></div>
+          <nav class="friends-tabs" aria-label="Filtrar amigos">
+            <button type="button" data-friends-tab="all" aria-current="page">Todos</button>
+            <button type="button" data-friends-tab="pending">Pendentes <span id="pending-friend-count" hidden>0</span></button>
+            <button type="button" data-friends-tab="add">Adicionar amigo</button>
+          </nav>
+          <button class="dialog-close" id="friends-close" type="button" aria-label="Fechar amigos">×</button>
+        </header>
+        <div class="friends-main-content">
+          <label class="friends-filter" id="friends-filter-wrap"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><input id="friends-filter" type="search" placeholder="Buscar amigos" autocomplete="off"><kbd>/</kbd></label>
+          <div class="friends-info-banner"><span class="friends-info-icon">i</span><span>Converse, envie uma mensagem direta ou convide alguém para sua sala.</span><button type="button" id="friends-share-room">Copiar convite da sala</button></div>
+          <section data-friends-section="all" aria-label="Todos os amigos"><h3 class="friends-section-heading">Todos os amigos <span id="friends-total-count">0</span></h3><div id="friend-list" class="social-list friends-list" aria-live="polite"></div><p class="friends-filter-empty" id="friends-filter-empty" hidden>Nenhum amigo corresponde à busca.</p></section>
+          <section data-friends-section="pending" aria-label="Solicitações de amizade" hidden><h3 class="friends-section-heading">Solicitações de amizade</h3><div id="pending-friend-list" class="social-list friends-list" aria-live="polite"></div></section>
+          <section data-friends-section="add" aria-label="Adicionar amigo" hidden>
+            <div class="friends-add-heading"><h3>Adicionar amigo</h3><p>Procure pelo identificador completo exibido no perfil, por exemplo: nome_12ab34cd.</p></div>
+            <form id="friend-search-form" class="friend-search-form"><label for="friend-username">Identificador do amigo</label><div><input id="friend-username" name="username" maxlength="64" autocomplete="off" placeholder="nome_12ab34cd" required><button class="primary-action" type="submit">Buscar</button></div></form>
+            <div id="friend-search-result" class="social-list" aria-live="polite"></div>
+          </section>
+          <p id="friends-status" class="account-status" role="status" aria-live="polite"></p>
+        </div>
+      </main>
+
+      <aside class="friends-activity" aria-label="Atividade dos amigos">
+        <h3>Atividade</h3>
+        <div class="friends-activity-empty"><span class="activity-spark">✦</span><strong>Nada acontecendo por enquanto</strong><p>Quando houver novidades dos seus amigos, elas vão aparecer aqui.</p></div>
+      </aside>
     </div>
   </section>
   <section class="social-backdrop" id="messages-dialog" hidden aria-modal="true" role="dialog" aria-labelledby="messages-title">

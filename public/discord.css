@@ -426,3 +426,122 @@ body[data-theme="light"] .preset-avatar-list button{background:#f3f5f9;border-co
   .dm-layout { grid-template-columns:1fr; grid-template-rows:minmax(110px, 25vh) minmax(50vh, 1fr); }
   .dm-contacts { border-right:0; border-bottom:1px solid var(--line,rgba(255,255,255,.1)); }
 }
+#friends-dialog { display: block; padding: 0; background: var(--canvas, #313338); }
+#friends-dialog[hidden] { display: none !important; }
+#friends-dialog .friends-workspace {
+  display: grid;
+  grid-template-columns: 296px minmax(0, 1fr) 282px;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0;
+  background: var(--canvas, #313338);
+  box-shadow: none;
+}
+.friends-sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px 8px 0; background: var(--rail, #1e1f22); border-right: 1px solid var(--line, rgba(255,255,255,.08)); }
+.friends-start-conversation { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 11px; border: 0; border-radius: 8px; background: var(--surface, #383a40); color: var(--ink, #f2f3f5); text-align: left; font-size: 11px; font-weight: 650; }
+.friends-start-conversation:hover { background: color-mix(in srgb, var(--surface, #383a40) 78%, var(--accent, #5865f2)); }
+.friends-start-conversation svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.friends-primary-nav { display: grid; gap: 3px; padding: 12px 0 10px; border-bottom: 1px solid var(--line, rgba(255,255,255,.09)); }
+.friends-primary-nav button { display: flex; align-items: center; gap: 10px; min-height: 37px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted, #b5bac1); text-align: left; font-size: 12px; }
+.friends-primary-nav button:hover,
+.friends-primary-nav button[aria-current="page"] { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); }
+.friends-primary-nav button[aria-current="page"] { font-weight: 700; }
+.friends-primary-nav svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.friends-nav-count { margin-left: auto; border-radius: 9px; padding: 2px 6px; background: #d74858; color: #fff; font-size: 9px; }
+.friends-dm-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 13px 8px 7px; color: var(--muted, #b5bac1); font-size: 10px; }
+.friends-dm-heading button { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--muted, #b5bac1); font-size: 18px; line-height: 1; }
+.friends-dm-heading button:hover { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); }
+.friends-direct-list { display: grid; align-content: start; gap: 2px; min-height: 0; overflow: auto; }
+.friend-shortcut { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; min-height: 40px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted, #b5bac1); text-align: left; font-size: 11px; }
+.friend-shortcut:hover { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); }
+.friend-shortcut-avatar { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; overflow: hidden; border-radius: 50%; background-color: var(--accent, #5865f2); background-position: center; background-size: cover; color: #fff; font-size: 11px; font-weight: 700; }
+.friend-shortcut-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friends-sidebar-footer { display: flex; align-items: center; gap: 7px; min-height: 36px; margin-top: auto; padding: 0 9px; color: var(--muted, #b5bac1); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.friends-sidebar-footer img { width: 19px; height: 19px; border-radius: 6px; }
+.friends-main { display: grid; grid-template-rows: 60px minmax(0, 1fr); min-width: 0; min-height: 0; }
+.friends-main-header { display: flex; align-items: center; gap: clamp(10px, 2vw, 24px); min-width: 0; padding: 0 20px; border-bottom: 1px solid var(--line, rgba(255,255,255,.08)); }
+.friends-title-wrap { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.friends-title-wrap svg { width: 18px; height: 18px; fill: none; stroke: var(--muted, #b5bac1); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.friends-main-header h2 { margin: 0; font-size: 14px; font-weight: 700; }
+.friends-main-header .friends-tabs { display: flex; flex: 1 1 auto; align-items: stretch; gap: 5px; min-width: 0; overflow-x: auto; margin: 0; padding: 0; border: 0; }
+.friends-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; flex: 0 0 auto; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: var(--muted, #b5bac1); white-space: nowrap; font-size: 11px; }
+.friends-tabs button:hover { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); }
+.friends-tabs button[aria-current="page"] { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); font-weight: 700; }
+.friends-tabs button span { border-radius: 10px; padding: 1px 6px; background: #d74858; color: #fff; font-size: 9px; }
+.friends-main-header .dialog-close { position: static; flex: 0 0 30px; width: 30px; height: 30px; margin-left: auto; font-size: 22px; }
+.friends-main-content { min-width: 0; overflow: auto; padding: 20px clamp(16px, 2vw, 28px) 28px; }
+.friends-filter { display: flex; align-items: center; gap: 9px; width: 100%; height: 40px; margin-bottom: 17px; padding: 0 11px; border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 8px; background: var(--rail, #1e1f22); color: var(--muted, #b5bac1); }
+.friends-filter[hidden] { display: none; }
+.friends-filter svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.friends-filter input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink, #f2f3f5); font: inherit; font-size: 11px; }
+.friends-filter input::placeholder { color: var(--muted, #9ba0a8); }
+.friends-filter kbd { display: grid; place-items: center; min-width: 19px; height: 19px; border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 4px; font: 10px ui-monospace, monospace; }
+.friends-info-banner { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 22px; padding: 9px 12px; border-radius: 6px; background: var(--rail, #1e1f22); color: var(--muted, #b5bac1); font-size: 10px; }
+.friends-info-icon { display: grid; place-items: center; width: 18px; height: 18px; flex: 0 0 auto; border: 2px solid currentColor; border-radius: 50%; font-size: 12px; font-weight: 700; }
+.friends-info-banner>span:nth-child(2) { flex: 1; }
+.friends-info-banner button { border: 0; background: transparent; color: var(--accent, #aeb4ff); font-size: 10px; white-space: nowrap; }
+.friends-info-banner button:hover { text-decoration: underline; }
+.friends-section-heading { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; padding-bottom: 9px; border-bottom: 1px solid var(--line, rgba(255,255,255,.08)); color: var(--muted, #b5bac1); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.friends-section-heading span { display: grid; place-items: center; min-width: 18px; height: 18px; border-radius: 10px; background: var(--surface, #383a40); font-size: 9px; }
+.friends-list { gap: 0; min-height: 0; }
+.friends-list .social-row { min-height: 64px; padding: 10px 7px; border-bottom: 1px solid var(--line, rgba(255,255,255,.06)); border-radius: 0; background: transparent; }
+.friends-list .social-row:hover { background: color-mix(in srgb, var(--surface, #383a40) 60%, transparent); }
+.friends-list .social-row .social-avatar { width: 38px; height: 38px; }
+.friends-list .social-row-name { font-size: 12px; }
+.friends-list .social-row-handle { font-size: 10px; }
+.friends-list .social-row-actions .secondary-button,
+.friends-list .social-row-actions .danger-action { min-height: 30px; height: 30px; padding: 0 10px; font-size: 10px; }
+.friends-filter-empty { padding: 20px 6px; color: var(--muted, #aaa); font-size: 11px; }
+.friends-add-heading h3 { margin: 3px 0 6px; font-size: 18px; }
+.friends-add-heading p { max-width: 600px; margin: 0; color: var(--muted, #aaa); font-size: 11px; line-height: 1.6; }
+.friends-main .friend-search-form { max-width: 680px; margin: 18px 0; }
+.friends-main .friend-search-form label { color: var(--muted, #b5bac1); font-size: 10px; }
+.friends-main .friend-search-form input { background: var(--rail, #1e1f22); color: var(--ink, #f2f3f5); }
+.friends-main .account-status { margin: 16px 0 0; }
+.friends-activity { min-width: 0; padding: 20px 16px; border-left: 1px solid var(--line, rgba(255,255,255,.08)); background: var(--canvas, #313338); }
+.friends-activity h3 { margin: 0 0 14px; font-size: 14px; }
+.friends-activity-empty { display: grid; justify-items: center; gap: 8px; padding: 20px 12px; border-radius: 9px; background: var(--surface, #383a40); text-align: center; }
+.activity-spark { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 2px; border-radius: 50%; background: var(--accent, #5865f2); color: #fff; font-size: 14px; }
+.friends-activity-empty strong { font-size: 11px; }
+.friends-activity-empty p { margin: 0; color: var(--muted, #b5bac1); font-size: 10px; line-height: 1.55; }
+@media (max-width: 960px) {
+  #friends-dialog .friends-workspace { grid-template-columns: 270px minmax(0, 1fr); }
+  .friends-activity { display: none; }
+}
+@media (max-width: 640px) {
+  #friends-dialog .friends-workspace { grid-template-columns: 56px minmax(0, 1fr); }
+  .friends-sidebar { align-items: center; padding: 8px 4px 0; }
+  .friends-start-conversation { justify-content: center; width: 42px; min-height: 42px; padding: 0; }
+  .friends-start-conversation span,
+  .friends-primary-nav button span:not(.friends-nav-count),
+  .friends-dm-heading>span,
+  .friend-shortcut-name,
+  .friends-sidebar-footer { display: none; }
+  .friends-primary-nav { width: 100%; gap: 4px; padding: 10px 0; }
+  .friends-primary-nav button { justify-content: center; width: 42px; padding: 0; }
+  .friends-primary-nav button svg { width: 18px; height: 18px; }
+  .friends-primary-nav button .friends-nav-count { position: absolute; transform: translate(15px, -11px); padding: 1px 4px; font-size: 8px; }
+  .friends-dm-heading { justify-content: center; width: 100%; padding: 7px 0; }
+  .friends-dm-heading button { width: 38px; height: 38px; font-size: 20px; }
+  .friends-direct-list { width: 100%; justify-items: center; gap: 4px; }
+  .friend-shortcut { justify-content: center; width: 42px; min-height: 42px; padding: 3px; }
+  .friend-shortcut-avatar { width: 34px; height: 34px; }
+  .friends-main { grid-template-rows: auto minmax(0, 1fr); }
+  .friends-main-header { flex-wrap: wrap; gap: 4px 8px; min-height: 0; padding: 10px 10px 0; }
+  .friends-title-wrap { order: 1; min-height: 34px; }
+  .friends-main-header .dialog-close { order: 2; margin-left: auto; }
+  .friends-main-header .friends-tabs { order: 3; flex-basis: 100%; min-height: 38px; }
+  .friends-tabs button { min-height: 34px; padding: 0 8px; font-size: 10px; }
+  .friends-main-content { padding: 14px 11px 22px; }
+  .friends-info-banner { align-items: flex-start; flex-wrap: wrap; gap: 7px; padding: 9px; font-size: 9px; }
+  .friends-info-banner>span:nth-child(2) { flex-basis: calc(100% - 34px); }
+  .friends-info-banner button { margin-left: 27px; font-size: 9px; }
+  .friends-list .social-row { gap: 8px; padding: 9px 3px; }
+  .friends-list .social-row .social-avatar { width: 34px; height: 34px; }
+  .friends-list .social-row-actions { gap: 4px; }
+  .friends-list .social-row-actions .secondary-button,
+  .friends-list .social-row-actions .danger-action { height: 28px; min-height: 28px; padding: 0 7px; font-size: 9px; }
+}

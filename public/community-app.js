@@ -810,6 +810,24 @@
     return row;
   }
 
+  function makeFriendShortcut(profile) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'friend-shortcut';
+    const avatar = document.createElement('span');
+    avatar.className = 'friend-shortcut-avatar';
+    const url = avatarUrl(profile.avatar_path);
+    if (url) avatar.style.backgroundImage = `url("${url.replaceAll('"', '')}")`;
+    else avatar.textContent = (profile.display_name || 'C').trim().slice(0, 1).toUpperCase();
+    const name = document.createElement('span');
+    name.className = 'friend-shortcut-name';
+    name.textContent = profile.display_name || 'Participante';
+    button.append(avatar, name);
+    button.title = profile.username ? `${name.textContent} · @${profile.username}` : name.textContent;
+    button.addEventListener('click', () => openDirectMessage(profile).catch((error) => socialStatus(friendlyError(error))));
+    return button;
+  }
+
   async function loadSocialProfiles(ids) {
     const uniqueIds = [...new Set(ids)].filter(Boolean);
     if (!uniqueIds.length) return [];
@@ -845,12 +863,15 @@
     const friendList = $('friend-list');
     const pendingList = $('pending-friend-list');
     const contacts = $('dm-contacts');
-    friendList.replaceChildren(); pendingList.replaceChildren(); contacts.replaceChildren();
+    const shortcuts = $('friends-direct-list');
+    friendList.replaceChildren(); pendingList.replaceChildren(); contacts.replaceChildren(); shortcuts.replaceChildren();
+    $('friends-total-count').textContent = String(state.friends.length);
     if (!state.friends.length) {
       const empty = document.createElement('p'); empty.className = 'social-status'; empty.textContent = 'Você ainda não adicionou amigos.'; friendList.append(empty);
     }
     for (const friend of state.friends) {
       const openChat = () => openDirectMessage(friend);
+      shortcuts.append(makeFriendShortcut(friend));
       const row = makeSocialRow(friend, [
         { label: 'Mensagem', action: openChat },
         { label: 'Remover', danger: true, action: async () => {
@@ -873,6 +894,8 @@
     const pendingCount = state.incomingRequests.length + state.outgoingRequests.length;
     $('pending-friend-count').textContent = String(pendingCount);
     $('pending-friend-count').hidden = pendingCount === 0;
+    $('friends-sidebar-request-count').textContent = String(pendingCount);
+    $('friends-sidebar-request-count').hidden = pendingCount === 0;
     if (!pendingCount) { const empty = document.createElement('p'); empty.className = 'social-status'; empty.textContent = 'Não há solicitações pendentes.'; pendingList.append(empty); }
     for (const request of state.incomingRequests) {
       const profile = profileFor(request.sender_id);
@@ -893,6 +916,7 @@
     setActiveArea('friends');
     $('friends-dialog').hidden = false;
     activateFriendsTab(tab);
+    socialStatus('Carregando amigos…');
     try { await loadFriends(); socialStatus(''); }
     catch (error) { socialStatus(`${friendlyError(error)} Se as tabelas sociais ainda não existem, aplique a migração 202611070003_caemgamo_social.sql.`, 'friends-status', true); }
   }
@@ -900,6 +924,26 @@
   function activateFriendsTab(tab) {
     document.querySelectorAll('[data-friends-tab]').forEach((button) => button.setAttribute('aria-current', String(button.dataset.friendsTab === tab)));
     document.querySelectorAll('[data-friends-section]').forEach((section) => { section.hidden = section.dataset.friendsSection !== tab; });
+    $('friends-title').textContent = tab === 'pending' ? 'Solicitações de amizade' : tab === 'add' ? 'Adicionar amigo' : 'Amigos';
+    $('friends-sidebar-home').setAttribute('aria-current', String(tab === 'all'));
+    $('friends-sidebar-requests').setAttribute('aria-current', String(tab === 'pending'));
+    $('friends-filter-wrap').hidden = tab === 'add';
+    $('friends-filter').value = '';
+    filterFriends();
+  }
+
+  function filterFriends() {
+    const query = $('friends-filter').value.trim().toLocaleLowerCase();
+    const activeSection = document.querySelector('#friends-dialog [data-friends-section]:not([hidden])');
+    if (!activeSection || activeSection.dataset.friendsSection === 'add') return;
+    const rows = [...activeSection.querySelectorAll('.social-row')];
+    let visibleCount = 0;
+    for (const row of rows) {
+      const matches = !query || row.textContent.toLocaleLowerCase().includes(query);
+      row.hidden = !matches;
+      if (matches) visibleCount++;
+    }
+    $('friends-filter-empty').hidden = activeSection.dataset.friendsSection !== 'all' || !query || visibleCount > 0;
   }
 
   async function searchFriend() {
@@ -1131,6 +1175,12 @@
     $('nav-communities').addEventListener('click', () => { closeSocialViews(); setActiveArea('communities'); });
     $('nav-streams').addEventListener('click', () => { closeSocialViews(); setActiveArea('streams'); $('share-button').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
     $('friends-close').addEventListener('click', () => { $('friends-dialog').hidden = true; });
+    $('friends-start-conversation').addEventListener('click', () => openMessages().catch((error) => socialStatus(friendlyError(error))));
+    $('friends-sidebar-home').addEventListener('click', () => activateFriendsTab('all'));
+    $('friends-sidebar-requests').addEventListener('click', () => activateFriendsTab('pending'));
+    $('friends-add-direct').addEventListener('click', () => activateFriendsTab('add'));
+    $('friends-share-room').addEventListener('click', () => $('copy-invite').click());
+    $('friends-filter').addEventListener('input', filterFriends);
     $('messages-close').addEventListener('click', async () => {
       $('messages-dialog').hidden = true;
       if (state.directSubscription) await state.client.removeChannel(state.directSubscription);
