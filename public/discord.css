@@ -428,6 +428,8 @@ body[data-theme="light"] .preset-avatar-list button{background:#f3f5f9;border-co
 }
 #friends-dialog { display: block; padding: 0; background: var(--canvas, #313338); }
 #friends-dialog[hidden] { display: none !important; }
+.app-shell.auth-required .layout,
+.app-shell.auth-required .mobile-tabs { display: none !important; }
 #friends-dialog .friends-workspace {
   display: grid;
   grid-template-columns: 296px minmax(0, 1fr) 282px;
@@ -454,6 +456,11 @@ body[data-theme="light"] .preset-avatar-list button{background:#f3f5f9;border-co
 .friends-dm-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 13px 8px 7px; color: var(--muted, #b5bac1); font-size: 10px; }
 .friends-dm-heading button { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--muted, #b5bac1); font-size: 18px; line-height: 1; }
 .friends-dm-heading button:hover { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); }
+.friends-community-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 7px; padding: 2px 7px 7px; }
+.friends-community-empty { margin: 0 9px 7px; color: var(--muted, #9299a2); font-size: 9px; line-height: 1.5; }
+.friends-community-shortcut { display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 12px; background-color: var(--surface, #383a40); background-position: center; background-size: cover; color: var(--ink, #f2f3f5); font-size: 12px; font-weight: 750; }
+.friends-community-shortcut:hover { border-radius: 9px; background-color: var(--accent, #5865f2); color: #fff; }
+.friends-community-shortcut.has-community-icon { color: transparent; }
 .friends-direct-list { display: grid; align-content: start; gap: 2px; min-height: 0; overflow: auto; }
 .friend-shortcut { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; min-height: 40px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted, #b5bac1); text-align: left; font-size: 11px; }
 .friend-shortcut:hover { background: var(--surface, #383a40); color: var(--ink, #f2f3f5); }
@@ -521,11 +528,13 @@ body[data-theme="light"] .preset-avatar-list button{background:#f3f5f9;border-co
   .friend-shortcut-name,
   .friends-sidebar-footer { display: none; }
   .friends-primary-nav { width: 100%; gap: 4px; padding: 10px 0; }
-  .friends-primary-nav button { justify-content: center; width: 42px; padding: 0; }
+  .friends-primary-nav button { position: relative; justify-content: center; width: 42px; padding: 0; }
   .friends-primary-nav button svg { width: 18px; height: 18px; }
   .friends-primary-nav button .friends-nav-count { position: absolute; transform: translate(15px, -11px); padding: 1px 4px; font-size: 8px; }
   .friends-dm-heading { justify-content: center; width: 100%; padding: 7px 0; }
   .friends-dm-heading button { width: 38px; height: 38px; font-size: 20px; }
+  .friends-community-list { grid-template-columns: 1fr; justify-items: center; gap: 5px; padding: 3px 0 7px; }
+  .friends-community-shortcut { width: 38px; height: 38px; }
   .friends-direct-list { width: 100%; justify-items: center; gap: 4px; }
   .friend-shortcut { justify-content: center; width: 42px; min-height: 42px; padding: 3px; }
   .friend-shortcut-avatar { width: 34px; height: 34px; }

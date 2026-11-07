@@ -7,6 +7,7 @@
     friends: [], incomingRequests: [], outgoingRequests: [], seenMessages: new Set(), profiles: new Map(), configured: false, recoveryEmail: ''
   };
   const requestedChannel = new URLSearchParams(location.search).get('canal') || '';
+  const requestedRoom = new URLSearchParams(location.search).get('sala') || '';
   const hashParams = new URLSearchParams(location.hash.slice(1));
   const inviteToken = hashParams.get('convite') || '';
   let statusTimer;
@@ -151,6 +152,7 @@
   async function loadCommunities(preferredId = state.communityId) {
     const list = $('my-communities');
     list.replaceChildren();
+    $('friends-community-list').replaceChildren();
     state.communities = [];
     if (!state.session?.user) { state.communityId = null; updateAccountView(); return; }
     const { data: memberships, error: memberError } = await state.client.from('community_members').select('community_id,role').eq('user_id', state.session.user.id);
@@ -161,6 +163,7 @@
       if (error) throw error;
       state.communities = data || [];
     }
+    $('friends-community-empty').hidden = state.communities.length > 0;
     const rail = document.querySelector('.server-rail');
     rail.querySelectorAll('[data-community-button]').forEach((button) => button.remove());
     state.communities.forEach((community) => {
@@ -179,6 +182,24 @@
       row.textContent = community.name;
       row.addEventListener('click', () => selectCommunity(community.id));
       list.append(row);
+      const shortcut = document.createElement('button');
+      shortcut.type = 'button';
+      shortcut.className = 'friends-community-shortcut';
+      shortcut.title = community.name;
+      shortcut.setAttribute('aria-label', `Abrir comunidade ${community.name}`);
+      shortcut.textContent = community.name.trim().slice(0, 1).toUpperCase();
+      if (community.icon_path) {
+        shortcut.style.backgroundImage = `url("${avatarUrlFrom('community-icons', community.icon_path).replaceAll('"', '')}")`;
+        shortcut.classList.add('has-community-icon');
+      }
+      shortcut.addEventListener('click', async () => {
+        try {
+          await selectCommunity(community.id);
+          $('friends-dialog').hidden = true;
+          setActiveArea('communities');
+        } catch (error) { socialStatus(friendlyError(error)); }
+      });
+      $('friends-community-list').append(shortcut);
     });
     state.communityId = state.communities.some((item) => item.id === preferredId) ? preferredId : state.communities[0]?.id || null;
     if (state.communityId) await selectCommunity(state.communityId);
@@ -443,7 +464,8 @@
     if (!name?.trim()) return;
     const description = prompt('Descrição curta (opcional):') || '';
     const rules = prompt('Regras da comunidade (opcional):') || '';
-    const isPublic = confirm('Permitir que usuários conectados encontrem esta comunidade? (Cancelar cria uma comunidade privada por convite)');
+    const visibility = prompt('Visibilidade da comunidade: digite "publica" para permitir que qualquer usuário conectado a encontre. A opção padrão é privada por convite.', 'privada') || 'privada';
+    const isPublic = visibility.trim().toLocaleLowerCase() === 'publica';
     const { data, error } = await state.client.rpc('create_community', { p_name: name.trim(), p_description: description, p_is_public: isPublic, p_rules: rules });
     if (error) throw error;
     await loadCommunities(data);
@@ -1178,8 +1200,10 @@
     $('friends-start-conversation').addEventListener('click', () => openMessages().catch((error) => socialStatus(friendlyError(error))));
     $('friends-sidebar-home').addEventListener('click', () => activateFriendsTab('all'));
     $('friends-sidebar-requests').addEventListener('click', () => activateFriendsTab('pending'));
+    $('friends-sidebar-communities').addEventListener('click', () => { $('friends-dialog').hidden = true; setActiveArea('communities'); });
+    $('friends-create-community').addEventListener('click', () => createCommunity().catch((error) => status(friendlyError(error), true)));
     $('friends-add-direct').addEventListener('click', () => activateFriendsTab('add'));
-    $('friends-share-room').addEventListener('click', () => $('copy-invite').click());
+    $('friends-create-community-banner').addEventListener('click', () => createCommunity().catch((error) => status(friendlyError(error), true)));
     $('friends-filter').addEventListener('input', filterFriends);
     $('messages-close').addEventListener('click', async () => {
       $('messages-dialog').hidden = true;
@@ -1490,6 +1514,11 @@
       if (!requestedChannel && !state.channel && state.communities.length === 0) {
         window.CaemgamoCommunity.canSend = false;
       }
+      if (!requestedChannel && !requestedRoom && !inviteToken) {
+        $('friends-dialog').hidden = false;
+        activateFriendsTab('all');
+        setActiveArea('friends');
+      }
       window.CAEMGAMO_ROOM_AUTH_CHANGED?.(true);
     } else {
       if (state.subscription) await state.client.removeChannel(state.subscription);
@@ -1515,6 +1544,8 @@
       clearChat();
       state.communities = [];
       state.communityId = null;
+      $('friends-community-list').replaceChildren();
+      $('friends-community-empty').hidden = true;
       window.CaemgamoCommunity.canSend = false;
       $('my-communities').replaceChildren();
       $('channel-list').replaceChildren();

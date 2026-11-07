@@ -1,11 +1,9 @@
-const ROOM_LIMIT = 15;
 const MEMBER_TTL_MS = 90_000;
 const HEARTBEAT_TTL_MS = MEMBER_TTL_MS;
 
 const JOIN_SCRIPT = `
   local now = tonumber(ARGV[2])
   local ttl = tonumber(ARGV[3])
-  local limit = tonumber(ARGV[4])
   local rows = redis.call('HGETALL', KEYS[1])
   local members = {}
   for i = 1, #rows, 2 do
@@ -15,7 +13,6 @@ const JOIN_SCRIPT = `
       redis.call('HDEL', KEYS[1], rows[i])
     end
   end
-  if #members >= limit then return {0, cjson.encode(members)} end
   redis.call('HSET', KEYS[1], ARGV[1], now + ttl)
   redis.call('PEXPIRE', KEYS[1], ttl)
   return {#members + 1, cjson.encode(members)}
@@ -73,7 +70,7 @@ class RoomManager {
       try {
         result = await this.redis.eval(JOIN_SCRIPT, {
           keys: [roomKey],
-          arguments: [client.id, String(Date.now()), String(MEMBER_TTL_MS), String(ROOM_LIMIT)]
+          arguments: [client.id, String(Date.now()), String(MEMBER_TTL_MS)]
         });
       } catch (error) {
         if (room.clients.size === 0) await this.removeLocalRoom(roomName, room);
@@ -82,10 +79,6 @@ class RoomManager {
 
       const count = Number(result[0]);
       const existing = JSON.parse(result[1] || '[]');
-      if (count === 0) {
-        if (room.clients.size === 0) await this.removeLocalRoom(roomName, room);
-        return { full: true };
-      }
 
       room.clients.set(client.id, client);
       client.room = roomName;
@@ -97,13 +90,12 @@ class RoomManager {
       if (existing.length) {
         await this.redis.publish(room.channel, JSON.stringify({ type: 'peer-joined', from: client.id }));
       }
-      return { full: false };
+      return { count };
     });
   }
 
   async joinMemory(client, roomName) {
     const room = this.memoryRooms.get(roomName) || new Map();
-    if (room.size >= ROOM_LIMIT) return { full: true };
     const existing = [...room.values()];
     room.set(client.id, client);
     this.memoryRooms.set(roomName, room);
@@ -116,7 +108,7 @@ class RoomManager {
     for (const other of existing) {
       this.send(other, { type: 'peer-joined', peerId: client.id, initiator: other.id < client.id });
     }
-    return { full: false };
+    return { count: room.size };
   }
 
   async leave(client) {

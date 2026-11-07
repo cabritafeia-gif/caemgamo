@@ -22,7 +22,7 @@ test('profile controls and account actions remain connected in the client', () =
   assert.doesNotMatch(logout, /\$\('account-dialog'\)\.hidden = true/);
   assert.match(community, /window\.CAEMGAMO_OPEN_ACCOUNT = openAccount/);
   assert.match(community, /window\.CAEMGAMO_ROOM_AUTH_CHANGED\?\.\(false\)/);
-  assert.match(app, /Entre na sua conta para acessar a sala/);
+  assert.match(app, /Entre ou crie sua conta/);
   assert.match(app, /type: 'auth-refresh'/);
   assert.match(app, /if \(!ws \|\| ws\.readyState >= WebSocket\.CLOSING\) connect\(\)/);
   assert.match(html, /name="username" minlength="3" maxlength="32"/);
@@ -95,4 +95,15 @@ test('friend requests and direct messages are backed by isolated database polici
   assert.match(socialDbTest, /unrelated user cannot send a message into a private conversation/);
   assert.match(socialDbTest, /backend blocks requests when the recipient disabled them/);
   assert.match(socialDbTest, /user can update their own profile/);
+});
+
+test('signed-in home opens social workspace without silently joining a call', () => {
+  assert.match(html, /id="friends-dialog"/);
+  assert.match(html, /id="friends-create-community-banner"/);
+  assert.match(html, /áudio e tela só começam quando você entrar em um canal de voz/);
+  assert.match(app, /let room = requestedRoom\.replace[\s\S]*?;\s*if \(room && room !== requestedRoom\)/);
+  assert.match(app, /function ensureRoomCode\(\)/);
+  assert.match(app, /function reconnectToRoom\(\)[\s\S]*?ensureRoomCode\(\)/);
+  assert.match(community, /const visibility = prompt\([\s\S]*?'privada'\)[\s\S]*?const isPublic = visibility\.trim\(\)\.toLocaleLowerCase\(\) === 'publica'/);
+  assert.match(community, /if \(!requestedChannel && !requestedRoom && !inviteToken\)[\s\S]*?\$\('friends-dialog'\)\.hidden = false/);
 });

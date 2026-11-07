@@ -279,17 +279,8 @@ async function handleMessage(client, message) {
     client.userId = authorization.user.id;
     client.voiceChannelId = authorization.voiceChannelId;
     client.directConversationId = authorization.directConversationId;
-    let result;
-    try { result = await roomManager.join(client, roomName); }
+    try { await roomManager.join(client, roomName); }
     catch (error) { await roomManager.leave(client); throw error; }
-    if (result.full) {
-      client.userId = null;
-      client.authAccessToken = '';
-      client.authVerifiedAt = 0;
-      client.voiceChannelId = null;
-      client.directConversationId = null;
-      send(client, { type: 'full' });
-    }
     return;
   }
   if ((message.type === 'auth-refresh' || message.type === 'voice-auth-refresh') && client.room) {

@@ -2,8 +2,8 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const requestedRoom = params.get('sala') || '';
 const requestedChannel = params.get('canal') || '';
-const room = requestedRoom.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64) || randomRoom();
-if (room !== requestedRoom) { params.set('sala', room); history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`); }
+let room = requestedRoom.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64);
+if (room && room !== requestedRoom) { params.set('sala', room); history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`); }
 
 const ui = {
   layout: document.querySelector('.layout'), connectionDot: $('connection-dot'), connectionLabel: $('connection-label'),
@@ -15,7 +15,7 @@ const ui = {
   toast: $('toast'), systemMessage: $('system-message'), installButton: $('install-button'), themeSelect: $('theme-select')
 };
 
-ui.roomCodeSide.textContent = room;
+ui.roomCodeSide.textContent = room || 'convide para gerar código';
 const peers = new Map();
 const participants = new Set();
 let ws, clientId = '', connected = false, roomJoined = false;
@@ -31,6 +31,14 @@ let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 function randomRoom() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return `sala-${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`;
+}
+function ensureRoomCode() {
+  if (room) return room;
+  room = randomRoom();
+  params.set('sala', room);
+  history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
+  ui.roomCodeSide.textContent = room;
+  return room;
 }
 function showToast(text) {
   ui.toast.textContent = text;
@@ -333,7 +341,9 @@ $('test-speaker-button').addEventListener('click', async () => {
 
 function updateParticipants() {
   const count = participants.size + 1;
-  ui.peopleCount.textContent = `${count}/15`;
+  ui.peopleCount.textContent = roomJoined ? String(count) : '—';
+  const selfParticipant = document.querySelector('[data-self-participant]');
+  if (selfParticipant) selfParticipant.hidden = !roomJoined;
   ui.participantList.replaceChildren();
   [...participants].sort().forEach((id, index) => {
     const row = document.createElement('div');
@@ -352,20 +362,20 @@ function updateParticipants() {
     ui.participantList.append(row);
   });
 
-  ui.stageTitle.textContent = count > 1 ? `${count} pessoas na sala` : 'Sua sala está pronta';
-  ui.stageSubtitle.textContent = count > 1
-    ? 'O microfone, a câmera e a tela podem ser ativados quando quiser.'
-    : 'Ative o microfone ou compartilhe sua tela mesmo sozinho.';
-  ui.stageHint.textContent = count > 1 ? `${count} de 15 participantes` : 'Controles disponíveis • aguardando pessoas';
-  ui.waitingAvatar.textContent = count > 1 ? String(count) : '+';
-  ui.waitingAvatar.classList.toggle('guest-avatar', count > 1);
+  ui.stageTitle.textContent = !roomJoined ? 'Entre quando quiser' : count > 1 ? `${count} pessoas na sala` : 'Sua sala está pronta';
+  ui.stageSubtitle.textContent = !roomJoined
+    ? 'Você está fora da chamada. Entre em um canal de voz quando quiser.'
+    : 'O microfone, a câmera e a tela só são ativados por você.';
+  ui.stageHint.textContent = roomJoined ? `${count} participantes` : 'Fora da chamada';
+  ui.waitingAvatar.textContent = roomJoined && count > 1 ? String(count) : '+';
+  ui.waitingAvatar.classList.toggle('guest-avatar', roomJoined && count > 1);
   ui.caption.textContent = participants.size
     ? 'Seus controles de áudio, câmera e tela estão disponíveis.'
-    : 'Você pode ligar e desligar o microfone e iniciar a transmissão a qualquer momento.';
+    : 'Nenhum microfone, câmera ou transmissão é ativado antes de você entrar em um canal de voz.';
   for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = !roomJoined;
   $('rejoin-button').hidden = roomJoined || !intentionalLeave;
   $('rejoin-button').textContent = everJoinedRoom ? 'Entrar novamente na sala' : 'Entrar na sala';
-  if (roomJoined) setConnection(`Sala conectada · ${count}/15`, 'connected');
+  if (roomJoined) setConnection(`Na sala · ${count} participantes`, 'connected');
   updateStage();
   updateChatState();
 }
@@ -521,7 +531,7 @@ function ensurePeer(peerId, initiator = false) {
       setConnection('Reconectando áudio e vídeo…', '');
       scheduleIceRestart(peer);
     }
-    if (pc.connectionState === 'connected' && roomJoined) setConnection(`Sala conectada · ${participants.size + 1}/15`, 'connected');
+    if (pc.connectionState === 'connected' && roomJoined) setConnection(`Na sala · ${participants.size + 1} participantes`, 'connected');
     if (pc.connectionState === 'connected') {
       peer.iceRestarts = 0;
       clearTimeout(peer.iceRestartTimer);
@@ -670,7 +680,7 @@ function connect() {
     const accessToken = await window.CaemgamoCommunity?.getAccessToken?.();
     if (!accessToken) {
       intentionalLeave = true;
-      setConnection('Entre na sua conta para acessar a sala', 'error');
+      setConnection('Entre ou crie sua conta');
       window.CAEMGAMO_OPEN_ACCOUNT?.();
       socket.close();
       return;
@@ -715,13 +725,6 @@ function connect() {
     } else if (message.type === 'signal') {
       try { await handleSignal(String(message.from || ''), message.data); }
       catch (error) { showToast(`Falha ao conectar: ${error.message}`); }
-    } else if (message.type === 'full') {
-      roomJoined = false;
-      intentionalLeave = true;
-      updateParticipants();
-      setConnection('Sala cheia · máximo 15 pessoas', 'error');
-      showToast('Esta sala já atingiu o limite de 15 participantes.');
-      socket.close();
     } else if (message.type === 'error') {
       setConnection('Não foi possível entrar', 'error');
       showToast(message.message || 'Erro ao entrar na sala.');
@@ -1013,7 +1016,7 @@ function endCurrentCall() {
   clearPeers();
   stopLocalMedia();
   stopClock();
-  setConnection('Você saiu da sala');
+  setConnection('Pronto para conversar');
   ui.caption.textContent = 'Entre novamente na sala para iniciar uma chamada.';
   for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = true;
   $('rejoin-button').hidden = false;
@@ -1025,9 +1028,10 @@ function reconnectToRoom() {
     window.CAEMGAMO_OPEN_ACCOUNT?.();
     return;
   }
+  ensureRoomCode();
   intentionalLeave = false;
   reconnectAttempts = 0;
-  setConnection('Reconectando…');
+  setConnection('Entrando na sala…');
   ui.caption.textContent = 'Conectando novamente à sala…';
   if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   else if (!ws || ws.readyState >= WebSocket.CLOSING) connect();
@@ -1160,8 +1164,8 @@ async function copyText(text, labelButton) {
     setTimeout(() => labelButton.textContent = old, 1800);
   } else showToast('Convite copiado. Envie para alguém entrar na sala.');
 }
-$('copy-invite').addEventListener('click', () => copyText(location.href));
-$('copy-code').addEventListener('click', () => copyText(room, $('copy-code-label')));
+$('copy-invite').addEventListener('click', () => { ensureRoomCode(); copyText(location.href); });
+$('copy-code').addEventListener('click', () => copyText(ensureRoomCode(), $('copy-code-label')));
 
 document.querySelectorAll('.mobile-tab').forEach((button) => button.addEventListener('click', () => {
   const chat = button.dataset.tab === 'chat';
@@ -1204,15 +1208,15 @@ const refreshRoomAuthorization = async () => {
 setInterval(refreshRoomAuthorization, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshRoomAuthorization(); });
 updateParticipants();
-setConnection('Verificando sua conta…');
+setConnection('Inicializando CAEMGAMO…');
 Promise.resolve(window.CaemgamoCommunity?.ready).then(() => {
   if (window.CaemgamoCommunity?.getAccessToken?.()) {
     intentionalLeave = true;
-    setConnection('Conta conectada · entre na sala');
+    setConnection('Pronto para conversar');
     updateParticipants();
   } else {
     intentionalLeave = true;
-    setConnection('Entre na sua conta para acessar a sala', 'error');
+    setConnection('Entre ou crie sua conta');
     window.CAEMGAMO_OPEN_ACCOUNT?.();
     updateParticipants();
   }
@@ -1224,15 +1228,17 @@ Promise.resolve(window.CaemgamoCommunity?.ready).then(() => {
 });
 window.CAEMGAMO_ROOM_AUTH_CHANGED = (authenticated) => {
   if (authenticated) {
+    document.querySelector('.app-shell')?.classList.remove('auth-required');
     if (!roomJoined) {
       intentionalLeave = true;
-      setConnection(everJoinedRoom ? 'Conta conectada · entre novamente na sala' : 'Conta conectada · entre na sala');
+      setConnection('Pronto para conversar');
       updateParticipants();
     }
   } else {
+    document.querySelector('.app-shell')?.classList.add('auth-required');
     endCurrentCall();
     intentionalLeave = true;
-    setConnection('Entre na sua conta para acessar a sala', 'error');
+    setConnection('Entre ou crie sua conta');
     $('rejoin-button').hidden = true;
     window.CAEMGAMO_OPEN_ACCOUNT?.();
   }

@@ -43,7 +43,7 @@ Com Docker e Supabase CLI instalados, execute `supabase start` e depois `supabas
 
 ## Proteções e limites conhecidos
 
-- Áudio ao vivo, câmera e transmissão continuam usando WebRTC ponto a ponto. O servidor de mídia não é um SFU; várias câmeras em uma sala com 15 pessoas podem exigir muita banda e processamento. TURN melhora conectividade quando configurado.
+- Áudio ao vivo, câmera e transmissão continuam usando WebRTC ponto a ponto, sem limite numérico fixo de participantes no app. O servidor de mídia não é um SFU; chamadas em grupos grandes podem exigir muita banda e processamento. TURN melhora conectividade quando configurado; um SFU é recomendado para grupos grandes.
 - Áudios gravados ou enviados têm até 30 segundos medidos no navegador, limite de 10 MB imposto pelo Storage e tipos MIME permitidos. Um cliente modificado pode falsificar a duração; verificar o arquivo com confiabilidade exigiria processamento de mídia no servidor, que não está configurado.
 - O banco limita mensagens a cinco por pessoa a cada dez segundos, convites a 30 por hora, moderação a 30 ações por dez minutos e denúncias a dez por hora. O Supabase Auth também limita solicitações de recuperação e tentativas de validação; mantenha uma expiração curta para OTP e monitore erros 429 no painel.
 - Cargos personalizados têm permissões explícitas e hierarquia validada no banco; usuários não podem atribuir a si mesmos cargos iguais ou superiores. Denúncias e auditoria ficam visíveis apenas a quem tem a permissão correspondente. Presentes são apenas emojis gratuitos: não há moeda, cobrança nem transação simulada.

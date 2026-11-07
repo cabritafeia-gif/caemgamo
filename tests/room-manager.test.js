@@ -2,17 +2,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { RoomManager } = require('../room-manager');
 
-test('voice room accepts at most 15 participants', async () => {
+test('voice room does not impose a fixed participant cap', async () => {
   const sent = [];
   const manager = new RoomManager({ redisUrl: '', send: (client, message) => sent.push({ id: client.id, message }), getIceServers: () => [] });
-  const joins = await Promise.all(Array.from({ length: 15 }, async (_, index) => {
+  const joins = await Promise.all(Array.from({ length: 20 }, async (_, index) => {
     const client = { id: `participant-${index}`, room: null };
     return { client, result: await manager.joinMemory(client, 'capacity-test') };
   }));
-  assert.ok(joins.every((join) => !join.result.full));
-  assert.equal(manager.memoryRooms.get('capacity-test').size, 15);
-  const overflow = await manager.joinMemory({ id: 'participant-16', room: null }, 'capacity-test');
-  assert.deepEqual(overflow, { full: true });
+  assert.ok(joins.every((join) => join.result.count >= 1));
+  assert.equal(manager.memoryRooms.get('capacity-test').size, 20);
+  const additional = await manager.joinMemory({ id: 'participant-21', room: null }, 'capacity-test');
+  assert.deepEqual(additional, { count: 21 });
+  assert.equal(manager.memoryRooms.get('capacity-test').size, 21);
 });
 
 test('two participants exchange WebRTC signaling and leave notifications', async () => {
@@ -21,8 +22,8 @@ test('two participants exchange WebRTC signaling and leave notifications', async
   const first = { id: 'participant-a', room: null };
   const second = { id: 'participant-b', room: null };
 
-  assert.deepEqual(await manager.joinMemory(first, 'signaling-test'), { full: false });
-  assert.deepEqual(await manager.joinMemory(second, 'signaling-test'), { full: false });
+  assert.deepEqual(await manager.joinMemory(first, 'signaling-test'), { count: 1 });
+  assert.deepEqual(await manager.joinMemory(second, 'signaling-test'), { count: 2 });
   assert.equal(delivered.find(({ id, message }) => id === first.id && message.type === 'joined').message.turnAvailable, false);
   assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-joined' && message.peerId === second.id));
 

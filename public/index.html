@@ -7,7 +7,7 @@
   <meta name="description" content="Converse por texto, voz e vídeo. Compartilhe sua tela com seu grupo no CAEMGAMO.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="CAEMGAMO">
-  <title>CAEMGAMO — sala privada</title>
+  <title>CAEMGAMO — conversas e comunidades</title>
   <link rel="manifest" href="/caemgamo.webmanifest">
   <link rel="icon" href="/caemgamo-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/caemgamo-icon.svg">
@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="/discord.css">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="app-shell auth-required">
     <header class="topbar">
       <a class="brand" href="/" aria-label="CAEMGAMO, início">
         <img class="brand-mark" src="/caemgamo-icon.svg" alt="">
@@ -23,7 +23,7 @@
       </a>
       <div class="topbar-center">
         <span class="live-dot" id="connection-dot"></span>
-        <span id="connection-label">Conectando à sala…</span>
+        <span id="connection-label">Inicializando CAEMGAMO…</span>
       </div>
       <button class="icon-button install-button" id="install-button" hidden title="Instalar aplicativo" aria-label="Instalar aplicativo">⇩</button>
       <label class="theme-picker" title="Escolher tema"><span aria-hidden="true">◐</span><select id="theme-select" aria-label="Escolher tema"><option value="dark">Escuro</option><option value="light">Claro</option><option value="navy">Azul-marinho</option></select></label>
@@ -43,7 +43,7 @@
 
       <aside class="sidebar">
         <div class="workspace-heading"><span id="workspace-name">CAEMGAMO</span><span class="workspace-chevron">⌄</span></div>
-        <nav class="workspace-nav" aria-label="Áreas do aplicativo">
+        <nav class="workspace-nav" id="workspace-nav" aria-label="Áreas do aplicativo">
           <button id="nav-friends" type="button">♧ <span>Amigos</span></button>
           <button id="nav-messages" type="button">✉ <span>Mensagens</span><span id="direct-unread-count" hidden>0</span></button>
           <button id="nav-calls" type="button">♫ <span>Chamadas</span></button>
@@ -56,15 +56,15 @@
         <div id="channel-list" class="channel-list" aria-label="Canais da comunidade"></div>
         <div class="room-card">
           <span class="room-icon">♫</span>
-          <div class="room-meta"><strong>Sala privada</strong><span id="room-code-side">gerando código…</span></div>
+          <div class="room-meta"><strong>Conversa direta</strong><span id="room-code-side">gerando convite…</span></div>
           <span class="lock-icon" aria-label="Privada">⌑</span>
         </div>
         <button class="invite-button" id="copy-invite"><span>＋</span> Convidar pessoa</button>
         <div class="community-actions community-tools"><button id="create-channel-button" disabled>＋ Criar canal</button><button id="create-invite-button" disabled>↗ Criar convite</button><button id="revoke-invite-button" disabled>⊘ Revogar convite</button><button id="manage-members-button" disabled>⚙ Gerenciar membros</button><button id="manage-roles-button" disabled>♙ Cargos personalizados</button><button id="view-reports-button" disabled>⚑ Denúncias</button><button id="view-audit-button" disabled>▤ Ver auditoria</button><button id="edit-community-button" disabled>✎ Editar comunidade</button><button id="community-icon-button" disabled>▧ Trocar imagem</button><button id="leave-community-button" disabled>⇤ Sair da comunidade</button><input id="community-icon-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
 
         <div class="side-divider"></div>
-        <div class="side-title people-heading">PARTICIPANTES <span class="count-badge" id="people-count">1/15</span></div>
-        <div class="person-row"><span class="person-avatar self-avatar">V</span><span class="person-name">Você</span><span class="self-tag">você</span></div>
+        <div class="side-title people-heading">PARTICIPANTES <span class="count-badge" id="people-count">—</span></div>
+        <div class="person-row" data-self-participant hidden><span class="person-avatar self-avatar">V</span><span class="person-name">Você</span><span class="self-tag">você</span></div>
         <div id="participant-list" aria-live="polite"></div>
 
         <div class="sidebar-note"><span class="note-spark">✦</span><div><strong>Convide seu grupo</strong><p>Compartilhe a sala para conversar, jogar ou mostrar sua tela.</p></div></div>
@@ -73,7 +73,7 @@
 
       <section class="main-column">
         <div class="room-header">
-          <div><div class="eyebrow">CANAL DE VOZ</div><h1><span class="voice-heading-icon">♫</span> sala privada</h1></div>
+          <div><div class="eyebrow">SALA DIRETA</div><h1><span class="voice-heading-icon">♫</span> conversa</h1></div>
           <button class="secondary-button" id="copy-code"><span>↗</span> <span id="copy-code-label">Convidar</span></button>
         </div>
 
@@ -241,7 +241,11 @@
         <nav class="friends-primary-nav" aria-label="Amizades e mensagens">
           <button type="button" id="friends-sidebar-home" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM16 4.5a3.5 3.5 0 0 1 0 6.8M17 14.7a4 4 0 0 1 4 4V20"></path></svg><span>Amigos</span></button>
           <button type="button" id="friends-sidebar-requests"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"></rect><path d="m4 7 8 6 8-6"></path></svg><span>Solicitações</span><span id="friends-sidebar-request-count" class="friends-nav-count" hidden>0</span></button>
+          <button type="button" id="friends-sidebar-communities"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"></path></svg><span>Comunidades</span></button>
         </nav>
+        <div class="friends-dm-heading friends-community-heading"><span>Suas comunidades</span><button type="button" id="friends-create-community" title="Criar comunidade" aria-label="Criar comunidade">＋</button></div>
+        <div id="friends-community-list" class="friends-community-list" aria-label="Suas comunidades"></div>
+        <p class="friends-community-empty" id="friends-community-empty" hidden>Crie uma comunidade privada e convide seus amigos.</p>
         <div class="friends-dm-heading"><span>Mensagens diretas</span><button type="button" id="friends-add-direct" title="Adicionar amigo" aria-label="Adicionar amigo">＋</button></div>
         <div id="friends-direct-list" class="friends-direct-list" aria-label="Seus amigos e conversas"></div>
         <div class="friends-sidebar-footer"><img src="/caemgamo-icon.svg" alt=""><span>CAEMGAMO</span></div>
@@ -259,7 +263,7 @@
         </header>
         <div class="friends-main-content">
           <label class="friends-filter" id="friends-filter-wrap"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><input id="friends-filter" type="search" placeholder="Buscar amigos" autocomplete="off"><kbd>/</kbd></label>
-          <div class="friends-info-banner"><span class="friends-info-icon">i</span><span>Converse, envie uma mensagem direta ou convide alguém para sua sala.</span><button type="button" id="friends-share-room">Copiar convite da sala</button></div>
+          <div class="friends-info-banner"><span class="friends-info-icon">i</span><span>Sua conta e suas comunidades são separadas. Crie um grupo privado e convide seus amigos; áudio e tela só começam quando você entrar em um canal de voz.</span><button type="button" id="friends-create-community-banner">Criar comunidade</button></div>
           <section data-friends-section="all" aria-label="Todos os amigos"><h3 class="friends-section-heading">Todos os amigos <span id="friends-total-count">0</span></h3><div id="friend-list" class="social-list friends-list" aria-live="polite"></div><p class="friends-filter-empty" id="friends-filter-empty" hidden>Nenhum amigo corresponde à busca.</p></section>
           <section data-friends-section="pending" aria-label="Solicitações de amizade" hidden><h3 class="friends-section-heading">Solicitações de amizade</h3><div id="pending-friend-list" class="social-list friends-list" aria-live="polite"></div></section>
           <section data-friends-section="add" aria-label="Adicionar amigo" hidden>
