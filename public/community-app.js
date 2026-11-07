@@ -2,7 +2,9 @@
   const $ = (id) => document.getElementById(id);
   const state = {
     client: null, session: null, profile: null, communities: [], communityId: null,
-    channel: null, subscription: null, moderationSubscription: null, seenMessages: new Set(), profiles: new Map(), configured: false, recoveryEmail: ''
+    channel: null, subscription: null, moderationSubscription: null, friendsSubscription: null,
+    directSubscription: null, dmNotifications: null, directConversationId: null, directFriend: null, directSeen: new Set(),
+    friends: [], incomingRequests: [], outgoingRequests: [], seenMessages: new Set(), profiles: new Map(), configured: false, recoveryEmail: ''
   };
   const requestedChannel = new URLSearchParams(location.search).get('canal') || '';
   const hashParams = new URLSearchParams(location.hash.slice(1));
@@ -114,9 +116,12 @@
     $('workspace-name').textContent = state.communities.find((item) => item.id === state.communityId)?.name || 'CAEMGAMO';
     for (const id of ['create-community-button', 'join-community-button', 'explore-community-button', 'add-community-button']) $(id).disabled = !state.configured || !signedIn;
     for (const id of ['create-channel-button', 'create-invite-button', 'revoke-invite-button', 'manage-members-button', 'manage-roles-button', 'view-reports-button', 'view-audit-button', 'edit-community-button', 'community-icon-button', 'leave-community-button']) $(id).disabled = !state.configured || !signedIn || !state.communityId;
+    $('account-email').textContent = state.session?.user?.email || '—';
+    $('profile-handle').textContent = state.profile?.username ? `@${state.profile.username}` : '—';
+    $('allow-friend-requests').checked = state.profile?.allow_friend_requests !== false;
     if (signedIn && state.profile) {
       $('profile-form').elements.display_name.value = state.profile.display_name || '';
-      $('profile-form').elements.theme.value = state.profile.preferred_theme || 'dark';
+      $('settings-theme-select').value = state.profile.preferred_theme || 'dark';
       setAvatar(avatarUrl(state.profile.avatar_path), state.profile.display_name);
     } else setAvatar('', 'C');
   }
@@ -125,6 +130,10 @@
     if (!state.session?.user) return;
     const { data, error } = await state.client.from('profiles').select('id,display_name,avatar_path,preferred_theme').eq('id', state.session.user.id).maybeSingle();
     if (error) throw error;
+    try {
+      const { data: preferences, error: handleError } = await state.client.from('profiles').select('username,allow_friend_requests').eq('id', state.session.user.id).maybeSingle();
+      if (!handleError) { data.username = preferences?.username || ''; data.allow_friend_requests = preferences?.allow_friend_requests !== false; }
+    } catch { /* a conta continua utilizável se a migração social ainda não foi aplicada */ }
     state.profile = data;
     if (data?.id) state.profiles.set(data.id, { ...(state.profiles.get(data.id) || {}), ...data });
     if (data?.id) window.CAEMGAMO_REFRESH_AUTHOR?.(data.id, data.display_name, avatarUrl(data.avatar_path));
@@ -705,9 +714,15 @@
 
   async function requestRecoveryCode(email) {
     state.recoveryEmail = String(email || '').trim();
+    if (!state.recoveryEmail) { status('Digite seu e-mail para receber o código.', true); return; }
     $('recovery-code-form').elements.email.value = state.recoveryEmail;
-    try { await state.client.auth.resetPasswordForEmail(state.recoveryEmail, { redirectTo: `${location.origin}/?recuperar=1` }); }
-    catch { /* resposta igual para endereços válidos ou não cadastrados */ }
+    try {
+      const { error } = await state.client.auth.resetPasswordForEmail(state.recoveryEmail, { redirectTo: `${location.origin}/?recuperar=1` });
+      if (error) throw error;
+    } catch (error) {
+      status(`Não foi possível solicitar o código agora. Confira a conexão e as configurações de e-mail do Supabase. ${friendlyError(error)}`, true);
+      return;
+    }
     showForm('recovery-code-form');
     status('Se houver uma conta para esse endereço, enviaremos um código de recuperação por e-mail.');
   }
@@ -726,6 +741,324 @@
     if (state.session?.user) return true;
     openAccount();
     return false;
+  }
+
+  function socialStatus(message, target = 'friends-status', error = false) {
+    const element = $(target);
+    if (!element) return;
+    element.textContent = message || '';
+    element.classList.toggle('is-error', error);
+  }
+
+  function makeSocialRow(profile, buttons = []) {
+    const row = document.createElement('div');
+    row.className = 'social-row';
+    const avatar = document.createElement('span');
+    avatar.className = 'social-avatar';
+    const url = avatarUrl(profile.avatar_path);
+    if (url) {
+      avatar.style.backgroundImage = `url("${url.replaceAll('"', '')}")`;
+      avatar.classList.add('has-avatar');
+    } else avatar.textContent = (profile.display_name || 'C').trim().slice(0, 1).toUpperCase();
+    const main = document.createElement('div');
+    main.className = 'social-row-main';
+    const name = document.createElement('div');
+    name.className = 'social-row-name';
+    name.textContent = profile.display_name || 'Participante';
+    const handle = document.createElement('div');
+    handle.className = 'social-row-handle';
+    handle.textContent = profile.username ? `@${profile.username}` : '';
+    main.append(name, handle);
+    const actions = document.createElement('div');
+    actions.className = 'social-row-actions';
+    for (const { label, action, danger = false } of buttons) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = danger ? 'link-action danger-action' : 'secondary-button';
+      button.textContent = label;
+      button.addEventListener('click', () => Promise.resolve(action()).catch((error) => {
+        const target = $('messages-dialog') && !$('messages-dialog').hidden ? 'messages-status' : 'friends-status';
+        socialStatus(friendlyError(error), target, true);
+      }));
+      actions.append(button);
+    }
+    row.append(avatar, main, actions);
+    return row;
+  }
+
+  async function loadSocialProfiles(ids) {
+    const uniqueIds = [...new Set(ids)].filter(Boolean);
+    if (!uniqueIds.length) return [];
+    const { data, error } = await state.client.from('profiles').select('id,username,display_name,avatar_path,allow_friend_requests').in('id', uniqueIds);
+    if (error) throw error;
+    for (const profile of data || []) state.profiles.set(profile.id, { ...(state.profiles.get(profile.id) || {}), ...profile });
+    return data || [];
+  }
+
+  function profileFor(id) { return state.profiles.get(id) || { id, display_name: 'Participante', username: '' }; }
+
+  async function loadFriends() {
+    if (!state.session?.user) return;
+    const userId = state.session.user.id;
+    const [friendResult, incomingResult, outgoingResult] = await Promise.all([
+      state.client.from('friendships').select('user_a,user_b').or(`user_a.eq.${userId},user_b.eq.${userId}`),
+      state.client.from('friend_requests').select('id,sender_id,receiver_id,created_at').eq('receiver_id', userId).order('created_at', { ascending: false }),
+      state.client.from('friend_requests').select('id,sender_id,receiver_id,created_at').eq('sender_id', userId).order('created_at', { ascending: false })
+    ]);
+    for (const result of [friendResult, incomingResult, outgoingResult]) if (result.error) throw result.error;
+    state.incomingRequests = incomingResult.data || [];
+    state.outgoingRequests = outgoingResult.data || [];
+    await loadSocialProfiles([
+      ...state.incomingRequests.map((request) => request.sender_id),
+      ...state.outgoingRequests.map((request) => request.receiver_id)
+    ]);
+    const friendIds = (friendResult.data || []).map((row) => row.user_a === userId ? row.user_b : row.user_a);
+    state.friends = await loadSocialProfiles(friendIds);
+    renderFriends();
+  }
+
+  function renderFriends() {
+    const friendList = $('friend-list');
+    const pendingList = $('pending-friend-list');
+    const contacts = $('dm-contacts');
+    friendList.replaceChildren(); pendingList.replaceChildren(); contacts.replaceChildren();
+    if (!state.friends.length) {
+      const empty = document.createElement('p'); empty.className = 'social-status'; empty.textContent = 'Você ainda não adicionou amigos.'; friendList.append(empty);
+    }
+    for (const friend of state.friends) {
+      const openChat = () => openDirectMessage(friend);
+      const row = makeSocialRow(friend, [
+        { label: 'Mensagem', action: openChat },
+        { label: 'Remover', danger: true, action: async () => {
+          const { error } = await state.client.rpc('remove_friend', { p_user_id: friend.id }); if (error) throw error;
+          if (state.directFriend?.id === friend.id) {
+            if (state.directSubscription) await state.client.removeChannel(state.directSubscription);
+            state.directSubscription = null; state.directConversationId = null; state.directFriend = null; state.directSeen.clear();
+            $('dm-recipient').textContent = 'Escolha um amigo'; $('dm-messages').replaceChildren(); $('direct-message-input').disabled = true;
+            $('direct-message-form').querySelector('button[type="submit"]').disabled = true; $('call-dm-button').disabled = true;
+          }
+          await loadFriends(); socialStatus('Amizade removida.');
+        } }
+      ]);
+      friendList.append(row);
+      const contact = makeSocialRow(friend, [{ label: 'Abrir', action: openChat }]);
+      contact.dataset.friendId = friend.id;
+      contact.setAttribute('aria-current', String(state.directFriend?.id === friend.id));
+      contacts.append(contact);
+    }
+    const pendingCount = state.incomingRequests.length + state.outgoingRequests.length;
+    $('pending-friend-count').textContent = String(pendingCount);
+    $('pending-friend-count').hidden = pendingCount === 0;
+    if (!pendingCount) { const empty = document.createElement('p'); empty.className = 'social-status'; empty.textContent = 'Não há solicitações pendentes.'; pendingList.append(empty); }
+    for (const request of state.incomingRequests) {
+      const profile = profileFor(request.sender_id);
+      const row = makeSocialRow(profile, [
+        { label: 'Aceitar', action: async () => { const { error } = await state.client.rpc('respond_friend_request', { p_request_id: request.id, p_accept: true }); if (error) throw error; await loadFriends(); socialStatus('Solicitação aceita.'); } },
+        { label: 'Recusar', danger: true, action: async () => { const { error } = await state.client.rpc('respond_friend_request', { p_request_id: request.id, p_accept: false }); if (error) throw error; await loadFriends(); socialStatus('Solicitação recusada.'); } }
+      ]);
+      pendingList.append(row);
+    }
+    for (const request of state.outgoingRequests) {
+      const row = makeSocialRow(profileFor(request.receiver_id), [{ label: 'Cancelar', danger: true, action: async () => { const { error } = await state.client.rpc('cancel_friend_request', { p_request_id: request.id }); if (error) throw error; await loadFriends(); socialStatus('Solicitação cancelada.'); } }]);
+      pendingList.append(row);
+    }
+  }
+
+  async function openFriends(tab = 'all') {
+    if (!requireAccount()) return;
+    setActiveArea('friends');
+    $('friends-dialog').hidden = false;
+    activateFriendsTab(tab);
+    try { await loadFriends(); socialStatus(''); }
+    catch (error) { socialStatus(`${friendlyError(error)} Se as tabelas sociais ainda não existem, aplique a migração 202611070003_caemgamo_social.sql.`, 'friends-status', true); }
+  }
+
+  function activateFriendsTab(tab) {
+    document.querySelectorAll('[data-friends-tab]').forEach((button) => button.setAttribute('aria-current', String(button.dataset.friendsTab === tab)));
+    document.querySelectorAll('[data-friends-section]').forEach((section) => { section.hidden = section.dataset.friendsSection !== tab; });
+  }
+
+  async function searchFriend() {
+    if (!requireAccount()) return;
+    const username = String($('friend-search-form').elements.username.value || '').trim().replace(/^@/, '');
+    $('friend-search-result').replaceChildren();
+    if (!username) return;
+    const { data, error } = await state.client.rpc('find_profile_by_username', { p_username: username });
+    if (error) throw error;
+    const profile = Array.isArray(data) ? data[0] : data;
+    if (!profile) { const empty = document.createElement('p'); empty.className = 'social-status'; empty.textContent = 'Não encontramos esse identificador.'; $('friend-search-result').append(empty); return; }
+    state.profiles.set(profile.id, profile);
+    const alreadyFriend = state.friends.some((friend) => friend.id === profile.id);
+    const outgoing = state.outgoingRequests.some((request) => request.receiver_id === profile.id);
+    const incoming = state.incomingRequests.find((request) => request.sender_id === profile.id);
+    const buttons = alreadyFriend ? [{ label: 'Enviar mensagem', action: () => openDirectMessage(profile) }]
+      : incoming ? [{ label: 'Aceitar solicitação', action: async () => { const { error: responseError } = await state.client.rpc('respond_friend_request', { p_request_id: incoming.id, p_accept: true }); if (responseError) throw responseError; await loadFriends(); } }]
+          : profile.allow_friend_requests === false ? []
+            : outgoing ? []
+          : [{ label: 'Adicionar amigo', action: async () => { const { error: requestError } = await state.client.rpc('send_friend_request', { p_user_id: profile.id }); if (requestError) throw requestError; await loadFriends(); socialStatus('Solicitação enviada.'); } }];
+    const row = makeSocialRow(profile, buttons);
+    if (outgoing) { const note = document.createElement('span'); note.className = 'social-row-handle'; note.textContent = 'Solicitação enviada'; row.append(note); }
+    else if (!alreadyFriend && !incoming && profile.allow_friend_requests === false) { const note = document.createElement('span'); note.className = 'social-row-handle'; note.textContent = 'Solicitações desativadas'; row.append(note); }
+    $('friend-search-result').append(row);
+  }
+
+  async function openMessages() {
+    if (!requireAccount()) return;
+    setActiveArea('messages');
+    $('messages-dialog').hidden = false;
+    $('direct-unread-count').hidden = true;
+    $('direct-unread-count').textContent = '0';
+    try { await loadFriends(); if (!state.friends.length) socialStatus('Adicione alguém como amigo para iniciar uma conversa.', 'messages-status'); }
+    catch (error) { socialStatus(`${friendlyError(error)} Aplique primeiro a migração social do Supabase.`, 'messages-status', true); }
+  }
+
+  async function openDirectMessage(friend) {
+    if (!state.session?.user) { openAccount(); return; }
+    $('friends-dialog').hidden = true;
+    $('messages-dialog').hidden = false;
+    setActiveArea('messages');
+    if (state.directSubscription) await state.client.removeChannel(state.directSubscription);
+    state.directSubscription = null;
+    state.directConversationId = null;
+    state.directFriend = friend;
+    state.directSeen.clear();
+    $('dm-recipient').textContent = friend.display_name || friend.username || 'Mensagem direta';
+    $('dm-messages').replaceChildren();
+    $('direct-message-input').disabled = true;
+    $('direct-message-form').querySelector('button[type="submit"]').disabled = true;
+    $('call-dm-button').disabled = true;
+    document.querySelectorAll('#dm-contacts [data-friend-id]').forEach((row) => row.setAttribute('aria-current', String(row.dataset.friendId === friend.id)));
+    const { data: conversationId, error } = await state.client.rpc('open_direct_conversation', { p_user_id: friend.id });
+    if (error) { socialStatus(friendlyError(error), 'messages-status', true); return; }
+    state.directConversationId = conversationId;
+    $('direct-message-input').disabled = false;
+    $('direct-message-form').querySelector('button[type="submit"]').disabled = false;
+    $('call-dm-button').disabled = false;
+    const { data: messages, error: messagesError } = await state.client.from('direct_messages').select('id,sender_id,content,created_at').eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(100);
+    if (messagesError) throw messagesError;
+    for (const message of messages || []) displayDirectMessage(message);
+    state.directSubscription = state.client.channel(`caemgamo-dm-${conversationId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `conversation_id=eq.${conversationId}` }, ({ new: message }) => displayDirectMessage(message))
+      .subscribe((subscriptionStatus) => { if (['CHANNEL_ERROR', 'TIMED_OUT'].includes(subscriptionStatus)) socialStatus('A conexão caiu. Feche e reabra a conversa para tentar novamente.', 'messages-status', true); });
+    $('dm-messages').scrollTop = $('dm-messages').scrollHeight;
+    socialStatus('');
+  }
+
+  function displayDirectMessage(message) {
+    if (!message?.id || state.directSeen.has(message.id)) return;
+    state.directSeen.add(message.id);
+    const row = document.createElement('div');
+    row.className = `dm-message${message.sender_id === state.session?.user?.id ? ' mine' : ''}`;
+    const content = document.createElement('div');
+    const callInvite = /^CAEMGAMO_CALL:(direct-[a-zA-Z0-9-]{30,64})$/.exec(message.content);
+    if (callInvite) {
+      const link = document.createElement('a');
+      link.className = 'primary-action call-invite-link';
+      link.href = `/?sala=${encodeURIComponent(callInvite[1])}`;
+      link.textContent = 'Entrar na chamada';
+      content.append(link);
+    } else content.textContent = message.content;
+    const meta = document.createElement('small');
+    meta.textContent = `${message.sender_id === state.session?.user?.id ? 'Você' : (state.directFriend?.display_name || 'Amigo')} · ${new Date(message.created_at).toLocaleString('pt-BR')}`;
+    row.append(content, meta); $('dm-messages').append(row);
+    $('dm-messages').scrollTop = $('dm-messages').scrollHeight;
+  }
+
+  async function sendDirectMessage(event) {
+    event.preventDefault();
+    const content = String($('direct-message-input').value || '').trim();
+    if (!state.directConversationId || !content) return;
+    const submit = $('direct-message-form').querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const { error } = await state.client.from('direct_messages').insert({ conversation_id: state.directConversationId, sender_id: state.session.user.id, content });
+      if (error) throw error;
+      $('direct-message-input').value = '';
+      socialStatus('');
+    } catch (error) { socialStatus(friendlyError(error), 'messages-status', true); }
+    finally { submit.disabled = false; }
+  }
+
+  async function startDirectCall() {
+    if (!state.directConversationId || !state.session?.user) return;
+    const room = `direct-${String(state.directConversationId).replace(/[^a-zA-Z0-9-]/g, '')}`;
+    const { error } = await state.client.from('direct_messages').insert({ conversation_id: state.directConversationId, sender_id: state.session.user.id, content: `CAEMGAMO_CALL:${room}` });
+    if (error) throw error;
+    location.assign(`/?sala=${encodeURIComponent(room)}`);
+  }
+
+  async function savePreferredTheme(theme) {
+    if (!state.session?.user) return;
+    const { error } = await state.client.from('profiles').update({ preferred_theme: theme }).eq('id', state.session.user.id);
+    if (error) throw error;
+    state.profile = { ...state.profile, preferred_theme: theme };
+    $('settings-theme-select').value = theme;
+  }
+
+  async function setAllowFriendRequests(enabled) {
+    if (!state.session?.user) return;
+    const { error } = await state.client.from('profiles').update({ allow_friend_requests: Boolean(enabled) }).eq('id', state.session.user.id);
+    if (error) throw error;
+    state.profile = { ...state.profile, allow_friend_requests: Boolean(enabled) };
+    $('privacy-settings-status').textContent = enabled ? 'Solicitações de amizade permitidas.' : 'Novas solicitações de amizade foram bloqueadas pelo banco.';
+  }
+
+  async function watchFriendRequests() {
+    if (state.friendsSubscription) await state.client.removeChannel(state.friendsSubscription);
+    if (!state.session?.user) { state.friendsSubscription = null; return; }
+    state.friendsSubscription = state.client.channel(`caemgamo-friends-${state.session.user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () => {
+        loadFriends().catch((error) => socialStatus(friendlyError(error), 'friends-status', true));
+      })
+      .subscribe();
+  }
+
+  async function watchDirectMessages() {
+    if (state.dmNotifications) await state.client.removeChannel(state.dmNotifications);
+    state.dmNotifications = null;
+    if (!state.session?.user) return;
+    state.dmNotifications = state.client.channel(`caemgamo-dm-notifications-${state.session.user.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages' }, async ({ new: message }) => {
+        if (message.sender_id === state.session?.user?.id) return;
+        if (message.conversation_id === state.directConversationId) { displayDirectMessage(message); return; }
+        try { await loadSocialProfiles([message.sender_id]); } catch { /* o aviso continua genérico */ }
+        const sender = profileFor(message.sender_id).display_name || 'um amigo';
+        const invite = /^CAEMGAMO_CALL:(direct-[a-zA-Z0-9-]{30,64})$/.exec(message.content || '');
+        const isCall = Boolean(invite);
+        const badge = $('direct-unread-count');
+        badge.hidden = false;
+        badge.textContent = String(Math.min(99, Number(badge.textContent || 0) + 1));
+        window.CAEMGAMO_DESKTOP_NOTIFY?.(
+          isCall ? `Chamada de ${sender}` : `Mensagem de ${sender}`,
+          isCall ? 'Toque para entrar na chamada.' : 'Toque para abrir a conversa.',
+          isCall ? () => location.assign(`/?sala=${encodeURIComponent(invite[1])}`) : () => openDirectMessage(profileFor(message.sender_id)).catch((error) => socialStatus(friendlyError(error), 'messages-status', true))
+        );
+        window.CAEMGAMO_TOAST?.(isCall ? `${sender} convidou você para uma chamada. Abra Mensagens para entrar.` : `Nova mensagem de ${sender}.`);
+      })
+      .subscribe((subscriptionStatus) => {
+        if (['CHANNEL_ERROR', 'TIMED_OUT'].includes(subscriptionStatus) && state.session?.user) socialStatus('As notificações de mensagens foram desconectadas.', 'messages-status', true);
+      });
+  }
+
+  function activateSettingsTab(tab) {
+    document.querySelectorAll('[data-settings-tab]').forEach((button) => button.setAttribute('aria-current', String(button.dataset.settingsTab === tab)));
+    document.querySelectorAll('[data-settings-section]').forEach((section) => { section.hidden = section.dataset.settingsSection !== tab; });
+  }
+
+  function closeSocialViews() {
+    $('friends-dialog').hidden = true;
+    $('messages-dialog').hidden = true;
+    if (state.directSubscription && state.client) state.client.removeChannel(state.directSubscription).catch(() => {});
+    state.directSubscription = null;
+    state.directConversationId = null;
+    state.directFriend = null;
+  }
+
+  function setActiveArea(area) {
+    document.querySelectorAll('#workspace-nav button').forEach((button) => {
+      if (button.id === `nav-${area}`) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
   }
 
   function watchModerationNotices() {
@@ -764,6 +1097,25 @@
 
   function bindForms() {
     for (const id of ['profile-button', 'rail-profile-button', 'rail-settings-button']) $(id).addEventListener('click', openAccount);
+    document.querySelectorAll('[data-settings-tab]').forEach((button) => button.addEventListener('click', () => activateSettingsTab(button.dataset.settingsTab)));
+    document.querySelectorAll('[data-friends-tab]').forEach((button) => button.addEventListener('click', () => activateFriendsTab(button.dataset.friendsTab)));
+    $('nav-friends').addEventListener('click', () => openFriends().catch((error) => socialStatus(friendlyError(error), 'friends-status', true)));
+    $('nav-messages').addEventListener('click', () => openMessages().catch((error) => socialStatus(friendlyError(error), 'messages-status', true)));
+    $('nav-calls').addEventListener('click', () => { closeSocialViews(); setActiveArea('calls'); document.querySelector('.main-column')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+    $('nav-communities').addEventListener('click', () => { closeSocialViews(); setActiveArea('communities'); });
+    $('nav-streams').addEventListener('click', () => { closeSocialViews(); setActiveArea('streams'); $('share-button').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+    $('friends-close').addEventListener('click', () => { $('friends-dialog').hidden = true; });
+    $('messages-close').addEventListener('click', async () => {
+      $('messages-dialog').hidden = true;
+      if (state.directSubscription) await state.client.removeChannel(state.directSubscription);
+      state.directSubscription = null; state.directConversationId = null; state.directFriend = null;
+    });
+    $('friends-dialog').addEventListener('click', (event) => { if (event.target === $('friends-dialog')) $('friends-dialog').hidden = true; });
+    $('messages-dialog').addEventListener('click', (event) => { if (event.target === $('messages-dialog')) closeSocialViews(); });
+    $('friend-search-form').addEventListener('submit', (event) => { event.preventDefault(); searchFriend().catch((error) => socialStatus(friendlyError(error), 'friends-status', true)); });
+    $('direct-message-form').addEventListener('submit', sendDirectMessage);
+    $('call-dm-button').addEventListener('click', () => startDirectCall().catch((error) => socialStatus(friendlyError(error), 'messages-status', true)));
+    $('direct-message-input').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('direct-message-form').requestSubmit(); } });
     $('home-server-button').addEventListener('click', () => location.assign('/'));
     $('account-close').addEventListener('click', () => { $('account-dialog').hidden = true; });
     $('account-dialog').addEventListener('click', (event) => { if (event.target === $('account-dialog')) $('account-dialog').hidden = true; });
@@ -808,6 +1160,8 @@
       if (event.key === 'Escape') {
         $('chat-menu-options').hidden = true;
         $('chat-menu').setAttribute('aria-expanded', 'false');
+        closeSocialViews();
+        $('account-dialog').hidden = true;
       }
     });
     $('show-sign-up').addEventListener('click', () => showForm('sign-up-form'));
@@ -821,7 +1175,7 @@
         if (error) throw error;
         $('account-dialog').hidden = true;
         status('Login realizado.');
-        if (requestedChannel) location.reload();
+        if (requestedChannel || !window.CAEMGAMO_IS_CALL_ACTIVE?.()) location.reload();
       } catch (error) { status(friendlyError(error), true); }
     }));
     $('sign-up-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
@@ -860,17 +1214,29 @@
     }));
     $('profile-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
       const display_name = String(values.get('display_name')).trim();
-      const preferred_theme = String(values.get('theme'));
       try {
-        const { error } = await state.client.from('profiles').update({ display_name, preferred_theme }).eq('id', state.session.user.id);
+        const { error } = await state.client.from('profiles').update({ display_name }).eq('id', state.session.user.id);
         if (error) throw error;
-        state.profile = { ...state.profile, display_name, preferred_theme };
+        state.profile = { ...state.profile, display_name };
         state.profiles.set(state.session.user.id, { ...(state.profiles.get(state.session.user.id) || {}), ...state.profile });
-        window.CAEMGAMO_APPLY_THEME?.(preferred_theme);
         setAvatar(avatarUrl(state.profile.avatar_path), display_name);
+        updateAccountView();
         status('Perfil salvo.');
       } catch (error) { status(friendlyError(error), true); }
     }));
+    $('settings-theme-select').addEventListener('change', async () => {
+      const theme = $('settings-theme-select').value;
+      window.CAEMGAMO_APPLY_THEME?.(theme);
+      try { await savePreferredTheme(theme); status('Tema salvo no seu perfil.'); }
+      catch (error) { status(`O tema ficou salvo neste navegador, mas não no perfil: ${friendlyError(error)}`, true); }
+    });
+    $('allow-friend-requests').addEventListener('change', async () => {
+      const checkbox = $('allow-friend-requests');
+      checkbox.disabled = true;
+      try { await setAllowFriendRequests(checkbox.checked); }
+      catch (error) { checkbox.checked = state.profile?.allow_friend_requests !== false; $('privacy-settings-status').textContent = friendlyError(error); }
+      finally { checkbox.disabled = false; }
+    });
     $('avatar-file').addEventListener('change', async (event) => {
       try { await changeAvatar(event.target.files?.[0]); }
       catch (error) { status(friendlyError(error), true); }
@@ -885,9 +1251,11 @@
       try {
         const { error } = await state.client.auth.signOut({ scope: 'local' });
         if (error) throw error;
+        window.CAEMGAMO_END_CALL?.();
         state.session = null;
         await settleAuth();
         $('account-dialog').hidden = true;
+        closeSocialViews();
         status('Você saiu da conta.');
         if (requestedChannel) location.replace('/');
       } catch (error) { status(friendlyError(error), true); }
@@ -933,9 +1301,13 @@
     canSend: false,
     activeTextChannel: null,
     getAccessToken: async () => state.session?.access_token || '',
+    getUserId: () => state.session?.user?.id || '',
+    savePreferredTheme,
     sendText,
     refreshTextChannel
   };
+  window.CAEMGAMO_OPEN_FRIENDS = () => openFriends();
+  window.CAEMGAMO_OPEN_MESSAGES = () => openMessages();
 
   bindForms();
   document.querySelectorAll('#auth-forms button[type="submit"]').forEach((button) => { button.disabled = true; });
@@ -957,6 +1329,7 @@
       const { data, error } = await state.client.auth.getSession();
       if (error) throw error;
       state.session = data.session;
+      window.CAEMGAMO_SET_MEDIA_USER?.(state.session?.user?.id || '');
       await settleAuth();
       if (inviteToken && !state.session?.user) {
         try { sessionStorage.setItem('caemgamo-pending-invite', inviteToken); } catch { /* o convite permanece no endereço */ }
@@ -964,12 +1337,25 @@
       }
       if (requestedChannel && !state.session?.user) openAccount();
       state.client.auth.onAuthStateChange((event, session) => {
+        const previousUserId = state.session?.user?.id || '';
         state.session = session;
+        const userId = state.session?.user?.id || '';
+        window.CAEMGAMO_SET_MEDIA_USER?.(userId);
+        if (event === 'SIGNED_OUT') {
+          window.CAEMGAMO_END_CALL?.();
+          closeSocialViews();
+        }
         if (event === 'PASSWORD_RECOVERY') {
           $('account-dialog').hidden = false;
           showForm('new-password-form');
         }
-        queueMicrotask(() => settleAuth().catch((authError) => status(friendlyError(authError), true)));
+        if (previousUserId === userId && ['INITIAL_SESSION', 'TOKEN_REFRESHED'].includes(event)) return;
+        queueMicrotask(async () => {
+          try {
+            await settleAuth();
+            if (event === 'SIGNED_IN') window.CAEMGAMO_RECONNECT_CALL?.();
+          } catch (authError) { status(friendlyError(authError), true); }
+        });
       });
       const recovery = Boolean(state.session?.user) && (new URLSearchParams(location.search).get('recuperar') === '1' || hashParams.get('type') === 'recovery');
       if (recovery) { $('account-dialog').hidden = false; showForm('new-password-form'); }
@@ -1001,9 +1387,17 @@
     if (state.session?.user) {
       watchModerationNotices();
       await loadProfile();
+      window.CAEMGAMO_SET_MEDIA_USER?.(state.session.user.id);
       let savedCommunity = null;
       try { savedCommunity = localStorage.getItem('caemgamo-community'); } catch { /* preferências opcionais */ }
       await loadCommunities(state.communityId || savedCommunity);
+      try {
+        await watchFriendRequests();
+        await loadFriends();
+        await watchDirectMessages();
+      } catch (error) {
+        if (!$('friends-dialog').hidden || !$('messages-dialog').hidden) socialStatus(`${friendlyError(error)} Aplique a migração social 202611070003_caemgamo_social.sql no Supabase.`, 'friends-status', true);
+      }
       let pendingInvite = '';
       try { pendingInvite = sessionStorage.getItem('caemgamo-pending-invite') || inviteToken; } catch { pendingInvite = inviteToken; }
       if (pendingInvite) {
@@ -1018,18 +1412,43 @@
         window.CaemgamoCommunity.canSend = false;
       }
     } else {
-      if (state.subscription) state.client.removeChannel(state.subscription);
-      if (state.moderationSubscription) state.client.removeChannel(state.moderationSubscription);
+      if (state.subscription) await state.client.removeChannel(state.subscription);
+      if (state.moderationSubscription) await state.client.removeChannel(state.moderationSubscription);
+      if (state.friendsSubscription) await state.client.removeChannel(state.friendsSubscription);
+      if (state.directSubscription) await state.client.removeChannel(state.directSubscription);
+      if (state.dmNotifications) await state.client.removeChannel(state.dmNotifications);
       state.subscription = null;
       state.moderationSubscription = null;
+      state.friendsSubscription = null;
+      state.directSubscription = null;
+      state.dmNotifications = null;
+      state.directConversationId = null;
+      state.directFriend = null;
+      state.directSeen.clear();
       state.profile = null;
       state.profiles.clear();
+      state.friends = [];
+      state.incomingRequests = [];
+      state.outgoingRequests = [];
       state.channel = null;
       window.CaemgamoCommunity.activeTextChannel = null;
       clearChat();
       state.communities = [];
       state.communityId = null;
       window.CaemgamoCommunity.canSend = false;
+      $('my-communities').replaceChildren();
+      $('channel-list').replaceChildren();
+      document.querySelectorAll('[data-community-button]').forEach((button) => button.remove());
+      $('workspace-name').textContent = 'CAEMGAMO';
+      $('friend-list').replaceChildren();
+      $('pending-friend-list').replaceChildren();
+      $('dm-contacts').replaceChildren();
+      $('dm-messages').replaceChildren();
+      $('direct-unread-count').hidden = true;
+      $('direct-unread-count').textContent = '0';
+      $('account-email').textContent = '—';
+      $('profile-handle').textContent = '—';
+      window.CAEMGAMO_SET_MEDIA_USER?.('');
       updateAccountView();
     }
     window.CAEMGAMO_UPDATE_CHAT_STATE?.();

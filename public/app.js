@@ -23,6 +23,9 @@ let audioTrack = null, cameraTrack = null, screenTrack = null;
 let toastTimer, callTimer, callStartedAt, unread = 0;
 let reconnectTimer = null, reconnectAttempts = 0, socketGeneration = 0, intentionalLeave = false;
 const audioBlockedPeers = new Set();
+let mediaUserId = '__boot__', mediaPreferences = { audioInputId: '', audioOutputId: '', videoInputId: '' };
+let microphoneTestStream = null, microphoneTestContext = null, microphoneTestFrame = null, cameraPreviewStream = null, cameraPreviewOwnsTrack = false;
+let mediaCaptureGeneration = 0, microphoneTestGeneration = 0, cameraPreviewGeneration = 0, desktopNotificationsEnabled = false;
 let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function randomRoom() {
@@ -44,16 +47,289 @@ function applyTheme(theme, save = true) {
   const selected = ['light', 'dark', 'navy'].includes(theme) ? theme : 'dark';
   document.body.dataset.theme = selected;
   ui.themeSelect.value = selected;
+  const settingsTheme = $('settings-theme-select');
+  if (settingsTheme) settingsTheme.value = selected;
   const colors = { light: '#f7f8fc', dark: '#1e1f22', navy: '#081a2a' };
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', colors[selected]);
   if (save) {
     try { localStorage.setItem('caemgamo-theme', selected); } catch { /* armazenamento indisponível */ }
   }
 }
+function mediaPreferencesKey(userId = mediaUserId) { return `caemgamo-media:${userId || 'guest'}`; }
+function saveMediaPreferences() {
+  try { localStorage.setItem(mediaPreferencesKey(), JSON.stringify(mediaPreferences)); } catch { showToast('O navegador não permite salvar as preferências de dispositivos.'); }
+}
+function notificationPreferenceKey(userId = mediaUserId) { return `caemgamo-notifications:${userId || 'guest'}`; }
+function setMediaUser(userId) {
+  const nextUserId = String(userId || '');
+  if (nextUserId === mediaUserId) return;
+  mediaUserId = nextUserId;
+  try {
+    const stored = JSON.parse(localStorage.getItem(mediaPreferencesKey()) || '{}');
+    mediaPreferences = {
+      audioInputId: typeof stored.audioInputId === 'string' ? stored.audioInputId : '',
+      audioOutputId: typeof stored.audioOutputId === 'string' ? stored.audioOutputId : '',
+      videoInputId: typeof stored.videoInputId === 'string' ? stored.videoInputId : ''
+    };
+  } catch { mediaPreferences = { audioInputId: '', audioOutputId: '', videoInputId: '' }; }
+  $('audio-input-select').value = mediaPreferences.audioInputId;
+  $('audio-output-select').value = mediaPreferences.audioOutputId;
+  $('video-input-select').value = mediaPreferences.videoInputId;
+  try { desktopNotificationsEnabled = localStorage.getItem(notificationPreferenceKey()) === 'true'; }
+  catch { desktopNotificationsEnabled = false; }
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') desktopNotificationsEnabled = false;
+  $('desktop-notifications-toggle').checked = desktopNotificationsEnabled;
+  $('notification-settings-status').textContent = typeof Notification === 'undefined'
+    ? 'Este navegador não oferece notificações do sistema.'
+    : Notification.permission === 'denied'
+      ? 'Notificações bloqueadas nas permissões do navegador. Altere o bloqueio nas configurações do site.'
+      : 'As notificações funcionam enquanto o aplicativo estiver aberto neste navegador.';
+}
+window.CAEMGAMO_SET_MEDIA_USER = setMediaUser;
 window.CAEMGAMO_APPLY_THEME = applyTheme;
 try { applyTheme(localStorage.getItem('caemgamo-theme') || 'dark', false); }
 catch { applyTheme('dark', false); }
-ui.themeSelect.addEventListener('change', () => applyTheme(ui.themeSelect.value));
+ui.themeSelect.addEventListener('change', async () => {
+  const theme = ui.themeSelect.value;
+  applyTheme(theme);
+  try { await window.CaemgamoCommunity?.savePreferredTheme?.(theme); }
+  catch (error) { showToast(`Tema salvo neste navegador, mas não no perfil: ${error.message}`); }
+});
+
+async function refreshMediaDevices() {
+  const message = $('device-support-message');
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    message.textContent = 'Este navegador não permite listar os dispositivos de mídia.';
+    return;
+  }
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const groups = [
+      ['audio-input-select', 'audioinput', 'Microfone', mediaPreferences.audioInputId],
+      ['audio-output-select', 'audiooutput', 'Saída de áudio', mediaPreferences.audioOutputId],
+      ['video-input-select', 'videoinput', 'Câmera', mediaPreferences.videoInputId]
+    ];
+    for (const [id, kind, label, selected] of groups) {
+      const select = $(id);
+      const options = [new Option('Padrão do navegador', '')];
+      devices.filter((device) => device.kind === kind).forEach((device, index) => options.push(new Option(device.label || `${label} ${index + 1}`, device.deviceId)));
+      select.replaceChildren(...options);
+      select.value = selected;
+      if (select.value !== selected) {
+        select.value = '';
+        if (kind === 'audioinput') mediaPreferences.audioInputId = '';
+        if (kind === 'audiooutput') mediaPreferences.audioOutputId = '';
+        if (kind === 'videoinput') mediaPreferences.videoInputId = '';
+      }
+    }
+    const canSelectOutput = typeof HTMLMediaElement.prototype.setSinkId === 'function';
+    $('audio-output-select').disabled = !canSelectOutput;
+    message.textContent = canSelectOutput
+      ? `${devices.filter((device) => device.kind === 'audioinput').length} microfone(s), ${devices.filter((device) => device.kind === 'videoinput').length} câmera(s) disponíveis.`
+      : 'A seleção manual da saída de áudio não é compatível com este navegador; o áudio usa a saída padrão.';
+  } catch (error) {
+    message.textContent = mediaErrorMessage(error, 'dispositivo');
+  }
+}
+
+function audioConstraints() {
+  return mediaPreferences.audioInputId ? { deviceId: { exact: mediaPreferences.audioInputId }, echoCancellation: true, noiseSuppression: true } : { echoCancellation: true, noiseSuppression: true };
+}
+function videoConstraints() {
+  return mediaPreferences.videoInputId ? { deviceId: { exact: mediaPreferences.videoInputId } } : true;
+}
+async function replaceActiveInput(kind) {
+  const audio = kind === 'audio';
+  const previous = audio ? audioTrack : cameraTrack;
+  if (!previous?.enabled || previous.readyState !== 'live') return;
+  const generation = mediaCaptureGeneration;
+  const stream = await navigator.mediaDevices.getUserMedia(audio ? { audio: audioConstraints() } : { video: videoConstraints() });
+  if (generation !== mediaCaptureGeneration || !roomJoined) { stream.getTracks().forEach((track) => track.stop()); return; }
+  const next = audio ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0];
+  if (!next) { stream.getTracks().forEach((track) => track.stop()); throw new Error(`Nenhum ${audio ? 'microfone' : 'câmera'} foi encontrado.`); }
+  try { await syncTrackToPeers(kind, next); }
+  catch (error) { stream.getTracks().forEach((track) => track.stop()); throw error; }
+  if (audio) audioTrack = next; else cameraTrack = next;
+  previous.stop();
+  next.addEventListener('ended', () => {
+    if (audio ? audioTrack !== next : cameraTrack !== next) return;
+    if (audio) audioTrack = null; else cameraTrack = null;
+    if (audio || !screenTrack) syncTrackToPeers(kind, null).catch(() => {});
+    updateMediaButton(audio ? 'mic-button' : 'camera-button', false, audio ? 'Microfone ligado' : 'Câmera ligada', audio ? 'Microfone desligado' : 'Câmera desligada');
+    broadcastMediaState(); updateStage();
+  }, { once: true });
+  if (!audio) updateStage();
+  broadcastMediaState();
+  await refreshMediaDevices();
+}
+async function applyOutputDevice() {
+  if (typeof HTMLMediaElement.prototype.setSinkId !== 'function') return;
+  await Promise.all([...peers.values()].map((peer) => peer.ui.audio.setSinkId(mediaPreferences.audioOutputId)));
+}
+
+for (const [id, field] of [['audio-input-select', 'audioInputId'], ['audio-output-select', 'audioOutputId'], ['video-input-select', 'videoInputId']]) {
+  $(id).addEventListener('change', async () => {
+    mediaPreferences[field] = $(id).value;
+    saveMediaPreferences();
+    try {
+      if (field === 'audioOutputId') await applyOutputDevice();
+      if (field === 'audioInputId' && audioTrack?.enabled) await replaceActiveInput('audio');
+      if (field === 'videoInputId' && cameraTrack?.enabled && !screenTrack) await replaceActiveInput('video');
+      if (field === 'videoInputId' && $('preview-camera-button').getAttribute('aria-pressed') === 'true') await startCameraPreview();
+      showToast('Dispositivo atualizado.');
+    } catch (error) {
+      const label = field === 'videoInputId' ? 'câmera' : field === 'audioOutputId' ? 'saída de áudio' : 'microfone';
+      showToast(mediaErrorMessage(error, label));
+    }
+  });
+}
+$('refresh-devices-button').addEventListener('click', () => refreshMediaDevices());
+navigator.mediaDevices?.addEventListener?.('devicechange', refreshMediaDevices);
+setMediaUser('');
+refreshMediaDevices();
+
+async function setDesktopNotifications(enabled) {
+  const checkbox = $('desktop-notifications-toggle');
+  const status = $('notification-settings-status');
+  if (!enabled) {
+    desktopNotificationsEnabled = false;
+    checkbox.checked = false;
+    status.textContent = 'Notificações diretas desativadas neste navegador.';
+  } else if (typeof Notification === 'undefined') {
+    desktopNotificationsEnabled = false; checkbox.checked = false;
+    status.textContent = 'Este navegador não oferece notificações do sistema.';
+    return;
+  } else {
+    let permission = Notification.permission;
+    if (permission === 'default') permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      desktopNotificationsEnabled = false; checkbox.checked = false;
+      status.textContent = permission === 'denied'
+        ? 'Permissão negada. Libere notificações nas configurações do navegador para este site.'
+        : 'Permita notificações para receber avisos enquanto o aplicativo estiver aberto.';
+      return;
+    }
+    desktopNotificationsEnabled = true; checkbox.checked = true;
+    status.textContent = 'Notificações ativadas enquanto o aplicativo estiver aberto neste navegador.';
+  }
+  try { localStorage.setItem(notificationPreferenceKey(), String(desktopNotificationsEnabled)); }
+  catch { status.textContent += ' A preferência não pôde ser salva neste navegador.'; }
+}
+function updateDesktopNotifications(enabled) {
+  setDesktopNotifications(enabled).catch(() => {
+    $('desktop-notifications-toggle').checked = desktopNotificationsEnabled;
+    $('notification-settings-status').textContent = 'Não foi possível alterar as notificações. Confira a permissão do navegador e tente novamente.';
+  });
+}
+$('desktop-notifications-toggle').addEventListener('change', () => updateDesktopNotifications($('desktop-notifications-toggle').checked));
+$('enable-notifications-button').addEventListener('click', () => updateDesktopNotifications(true));
+window.CAEMGAMO_DESKTOP_NOTIFY = (title, body, onClick) => {
+  if (!desktopNotificationsEnabled || !document.hidden || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  try {
+    const notification = new Notification(title, { body, icon: '/caemgamo-icon.svg' });
+    notification.onclick = () => { window.focus(); notification.close(); onClick?.(); };
+  } catch { /* o navegador pode restringir notificações fora de uma sessão segura */ }
+};
+
+function stopMediaChecks() {
+  microphoneTestGeneration++;
+  if (microphoneTestFrame) cancelAnimationFrame(microphoneTestFrame);
+  microphoneTestFrame = null;
+  microphoneTestStream?.getTracks().forEach((track) => track.stop());
+  microphoneTestStream = null;
+  if (microphoneTestContext) microphoneTestContext.close().catch(() => {});
+  microphoneTestContext = null;
+  $('microphone-meter').value = 0;
+  $('test-microphone-button').disabled = false;
+  $('microphone-test-status').textContent = 'Pronto para testar';
+}
+
+async function testMicrophone() {
+  stopMediaChecks();
+  const generation = microphoneTestGeneration;
+  try {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
+    $('test-microphone-button').disabled = true;
+    $('microphone-test-status').textContent = 'Fale por até cinco segundos…';
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() });
+    if (generation !== microphoneTestGeneration) { stream.getTracks().forEach((track) => track.stop()); return; }
+    microphoneTestStream = stream;
+    microphoneTestContext = new AudioContext();
+    const analyser = microphoneTestContext.createAnalyser();
+    analyser.fftSize = 512;
+    microphoneTestContext.createMediaStreamSource(microphoneTestStream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    const endAt = performance.now() + 5000;
+    const updateMeter = () => {
+      analyser.getByteTimeDomainData(samples);
+      let energy = 0;
+      for (const sample of samples) { const centered = (sample - 128) / 128; energy += centered * centered; }
+      $('microphone-meter').value = Math.min(1, Math.sqrt(energy / samples.length) * 4);
+      if (performance.now() >= endAt) { stopMediaChecks(); $('microphone-test-status').textContent = 'Teste concluído.'; refreshMediaDevices(); return; }
+      microphoneTestFrame = requestAnimationFrame(updateMeter);
+    };
+    microphoneTestFrame = requestAnimationFrame(updateMeter);
+    await refreshMediaDevices();
+  } catch (error) {
+    stopMediaChecks();
+    $('microphone-test-status').textContent = mediaErrorMessage(error, 'microfone');
+  }
+}
+
+async function stopCameraPreview() {
+  cameraPreviewGeneration++;
+  if (cameraPreviewOwnsTrack) cameraPreviewStream?.getTracks().forEach((track) => track.stop());
+  cameraPreviewStream = null; cameraPreviewOwnsTrack = false;
+  $('settings-camera-preview').srcObject = null;
+  $('settings-camera-preview').hidden = true;
+  $('preview-camera-button').setAttribute('aria-pressed', 'false');
+  $('preview-camera-button').textContent = 'Iniciar prévia da câmera';
+}
+
+async function startCameraPreview() {
+  await stopCameraPreview();
+  const generation = cameraPreviewGeneration;
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
+  const previewTrack = cameraTrack?.readyState === 'live' ? cameraTrack : null;
+  if (previewTrack) cameraPreviewStream = new MediaStream([previewTrack]);
+  else {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints() });
+    if (generation !== cameraPreviewGeneration) { stream.getTracks().forEach((track) => track.stop()); return; }
+    cameraPreviewStream = stream;
+    cameraPreviewOwnsTrack = true;
+  }
+  $('settings-camera-preview').srcObject = cameraPreviewStream;
+  $('settings-camera-preview').hidden = false;
+  $('settings-camera-preview').play().catch(() => {});
+  $('preview-camera-button').setAttribute('aria-pressed', 'true');
+  $('preview-camera-button').textContent = 'Parar prévia da câmera';
+  await refreshMediaDevices();
+}
+
+$('test-microphone-button').addEventListener('click', () => testMicrophone());
+$('preview-camera-button').addEventListener('click', () => {
+  if ($('preview-camera-button').getAttribute('aria-pressed') === 'true') stopCameraPreview();
+  else startCameraPreview().catch((error) => showToast(mediaErrorMessage(error, 'câmera')));
+});
+$('test-speaker-button').addEventListener('click', async () => {
+  let context, testAudio;
+  try {
+    context = new AudioContext();
+    testAudio = new Audio();
+    if (mediaPreferences.audioOutputId && typeof testAudio.setSinkId === 'function') await testAudio.setSinkId(mediaPreferences.audioOutputId);
+    const destination = context.createMediaStreamDestination();
+    testAudio.srcObject = destination.stream;
+    await testAudio.play();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    gain.gain.value = 0.12;
+    oscillator.frequency.value = 660;
+    oscillator.connect(gain).connect(destination);
+    oscillator.start(); oscillator.stop(context.currentTime + 0.35);
+    oscillator.addEventListener('ended', () => { testAudio.pause(); testAudio.srcObject = null; context.close().catch(() => {}); }, { once: true });
+    $('device-support-message').textContent = 'Foi emitido um tom curto na saída escolhida.';
+  } catch (error) { testAudio?.pause(); if (testAudio) testAudio.srcObject = null; context?.close().catch(() => {}); showToast(`Não foi possível testar a saída de áudio: ${error.message}`); }
+});
 
 function updateParticipants() {
   const count = participants.size + 1;
@@ -87,6 +363,7 @@ function updateParticipants() {
     ? 'Seus controles de áudio, câmera e tela estão disponíveis.'
     : 'Você pode ligar e desligar o microfone e iniciar a transmissão a qualquer momento.';
   for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = !roomJoined;
+  $('rejoin-button').hidden = roomJoined || !intentionalLeave;
   if (roomJoined) setConnection(`Sala conectada · ${count}/15`, 'connected');
   updateStage();
   updateChatState();
@@ -130,6 +407,7 @@ function createPeerTile(peerId) {
   audio.autoplay = true;
   audio.playsInline = true;
   audio.setAttribute('aria-label', 'Áudio do participante');
+  if (typeof audio.setSinkId === 'function') audio.setSinkId(mediaPreferences.audioOutputId).catch(() => {});
   const label = document.createElement('span');
   label.className = 'media-name';
   label.textContent = 'Pessoa';
@@ -514,13 +792,15 @@ function broadcastMediaState() {
 
 async function toggleMic() {
   if (!roomJoined) return;
+  const generation = mediaCaptureGeneration;
   const previousTrack = audioTrack;
   const previousEnabled = Boolean(previousTrack?.readyState === 'live' && previousTrack.enabled);
   let acquired = false;
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
     if (!audioTrack || audioTrack.readyState !== 'live') {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() });
+      if (generation !== mediaCaptureGeneration || !roomJoined) { stream.getTracks().forEach((track) => track.stop()); return; }
       audioTrack = stream.getAudioTracks()[0];
       if (!audioTrack) throw new Error('Nenhum microfone foi encontrado.');
       const track = audioTrack;
@@ -538,10 +818,12 @@ async function toggleMic() {
       audioTrack.enabled = !audioTrack.enabled;
     }
     await syncTrackToPeers('audio', audioTrack.enabled ? audioTrack : null);
+    if (generation !== mediaCaptureGeneration || !roomJoined) return;
     broadcastMediaState();
     updateMediaButton('mic-button', audioTrack.enabled, 'Microfone ligado', 'Microfone desligado');
     showToast(audioTrack.enabled ? 'Microfone ligado.' : 'Microfone desligado.');
   } catch (error) {
+    if (generation !== mediaCaptureGeneration || !roomJoined) return;
     if (acquired) { audioTrack?.stop(); audioTrack = null; }
     else if (audioTrack?.readyState === 'live') audioTrack.enabled = previousEnabled;
     await syncTrackToPeers('audio', previousEnabled && previousTrack?.readyState === 'live' ? previousTrack : null).catch(() => {});
@@ -553,13 +835,15 @@ async function toggleMic() {
 
 async function toggleCamera() {
   if (!roomJoined) return;
+  const generation = mediaCaptureGeneration;
   const previousTrack = cameraTrack;
   const previousEnabled = Boolean(previousTrack?.readyState === 'live' && previousTrack.enabled);
   let acquired = false;
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
     if (!cameraTrack || cameraTrack.readyState !== 'live') {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints() });
+      if (generation !== mediaCaptureGeneration || !roomJoined) { stream.getTracks().forEach((track) => track.stop()); return; }
       cameraTrack = stream.getVideoTracks()[0];
       if (!cameraTrack) throw new Error('Nenhuma câmera foi encontrada.');
       const track = cameraTrack;
@@ -578,10 +862,12 @@ async function toggleCamera() {
       cameraTrack.enabled = !cameraTrack.enabled;
     }
     if (!screenTrack) await syncTrackToPeers('video', cameraTrack.enabled ? cameraTrack : null);
+    if (generation !== mediaCaptureGeneration || !roomJoined) return;
     broadcastMediaState();
     updateMediaButton('camera-button', Boolean(cameraTrack?.enabled), 'Câmera ligada', 'Câmera desligada');
     updateStage();
   } catch (error) {
+    if (generation !== mediaCaptureGeneration || !roomJoined) return;
     if (acquired) { cameraTrack?.stop(); cameraTrack = null; }
     else if (cameraTrack?.readyState === 'live') cameraTrack.enabled = previousEnabled;
     if (!screenTrack) await syncTrackToPeers('video', previousEnabled && previousTrack?.readyState === 'live' ? previousTrack : null).catch(() => {});
@@ -609,12 +895,14 @@ async function toggleScreen() {
     catch { showToast('A transmissão parou, mas a câmera não conseguiu retomar o envio. Tente alterná-la novamente.'); }
     return;
   }
+  const generation = mediaCaptureGeneration;
   if (!navigator.mediaDevices?.getDisplayMedia || !window.isSecureContext) {
     showToast(window.isSecureContext ? 'Este navegador não permite compartilhar a tela.' : 'A tela só pode ser compartilhada em uma conexão HTTPS segura.');
     return;
   }
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    if (generation !== mediaCaptureGeneration || !roomJoined) { stream.getTracks().forEach((track) => track.stop()); return; }
     screenTrack = stream.getVideoTracks()[0];
     try { await syncTrackToPeers('video', screenTrack); }
     catch (error) {
@@ -622,6 +910,7 @@ async function toggleScreen() {
       screenTrack = null;
       throw error;
     }
+    if (generation !== mediaCaptureGeneration || !roomJoined) return;
     broadcastMediaState();
     updateMediaButton('share-button', true, 'Parar transmissão', 'Compartilhar tela');
     screenTrack.addEventListener('ended', () => stopScreenShare().catch(() => {}), { once: true });
@@ -630,6 +919,7 @@ async function toggleScreen() {
       ? 'Sua tela está sendo transmitida para as pessoas da sala.'
       : 'Sua tela está pronta para transmissão; quem entrar na sala poderá vê-la.';
   } catch (error) {
+    if (generation !== mediaCaptureGeneration || !roomJoined) return;
     if (error.name !== 'NotAllowedError') showToast('Não foi possível iniciar o compartilhamento de tela.');
   }
 }
@@ -666,6 +956,9 @@ function stopClock() {
 }
 
 function stopLocalMedia() {
+  mediaCaptureGeneration++;
+  stopMediaChecks();
+  stopCameraPreview();
   const tracks = [audioTrack, cameraTrack, screenTrack];
   audioTrack = cameraTrack = screenTrack = null;
   for (const track of tracks) track?.stop();
@@ -674,6 +967,32 @@ function stopLocalMedia() {
   updateMediaButton('share-button', false, 'Parar transmissão', 'Compartilhar tela');
   updateStage();
 }
+
+function endCurrentCall() {
+  intentionalLeave = true;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  roomJoined = false;
+  if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+  clearPeers();
+  stopLocalMedia();
+  stopClock();
+  setConnection('Você saiu da sala');
+  ui.caption.textContent = 'Entre novamente na sala para iniciar uma chamada.';
+  for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = true;
+  $('rejoin-button').hidden = false;
+}
+window.CAEMGAMO_END_CALL = endCurrentCall;
+window.CAEMGAMO_IS_CALL_ACTIVE = () => roomJoined;
+function reconnectToRoom() {
+  if (!intentionalLeave) return;
+  intentionalLeave = false;
+  reconnectAttempts = 0;
+  setConnection('Reconectando…');
+  ui.caption.textContent = 'Conectando novamente à sala…';
+  if (!ws || ws.readyState >= WebSocket.CLOSING) connect();
+}
+window.CAEMGAMO_RECONNECT_CALL = reconnectToRoom;
 
 function addMessage(text, mine, at = Date.now(), senderId = '', displayName = '', avatarUrl = '', media = null) {
   const row = document.createElement('div');
@@ -779,17 +1098,9 @@ $('camera-button').addEventListener('click', toggleCamera);
 $('share-button').addEventListener('click', toggleScreen);
 $('enable-audio-button').addEventListener('click', enableRemoteAudio);
 $('leave-button').addEventListener('click', () => {
-  intentionalLeave = true;
-  clearTimeout(reconnectTimer);
-  reconnectTimer = null;
-  roomJoined = false;
-  if (ws?.readyState === WebSocket.OPEN) ws.close();
-  clearPeers();
-  stopLocalMedia();
-  setConnection('Você saiu da sala');
-  ui.caption.textContent = 'Recarregue a página para entrar novamente.';
-  for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = true;
+  endCurrentCall();
 });
+$('rejoin-button').addEventListener('click', reconnectToRoom);
 
 async function copyText(text, labelButton) {
   try { await navigator.clipboard.writeText(text); }
@@ -815,10 +1126,14 @@ $('copy-code').addEventListener('click', () => copyText(room, $('copy-code-label
 document.querySelectorAll('.mobile-tab').forEach((button) => button.addEventListener('click', () => {
   const chat = button.dataset.tab === 'chat';
   const communities = button.dataset.tab === 'communities';
+  const friends = button.dataset.tab === 'friends';
+  const direct = button.dataset.tab === 'direct';
   ui.layout.classList.toggle('show-chat', chat);
   ui.layout.classList.toggle('show-communities', communities);
   document.querySelectorAll('.mobile-tab').forEach((tab) => tab.classList.toggle('selected', tab === button));
   if (chat) { unread = 0; $('unread-count').hidden = true; }
+  if (friends) window.CAEMGAMO_OPEN_FRIENDS?.().catch((error) => showToast(error.message));
+  if (direct) window.CAEMGAMO_OPEN_MESSAGES?.().catch((error) => showToast(error.message));
 }));
 
 let installPrompt;

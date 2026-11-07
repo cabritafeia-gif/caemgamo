@@ -33,4 +33,3 @@ test('two participants exchange WebRTC signaling and leave notifications', async
   assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-left' && message.peerId === second.id));
   assert.equal(manager.memoryRooms.get('signaling-test').size, 1);
 });
-

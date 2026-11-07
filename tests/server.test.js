@@ -122,4 +122,3 @@ test('voice authorization fails closed when Supabase denies or is unavailable', 
   global.fetch = async () => ({ ok: false, json: async () => true });
   assert.equal(await canJoinVoiceChannel(VALID_CHANNEL, 'x'.repeat(60)), false);
 });
-

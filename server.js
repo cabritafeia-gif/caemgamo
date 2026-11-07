@@ -350,4 +350,3 @@ if (require.main === module) {
 }
 
 module.exports = { server, start, canJoinVoiceChannel, getIceServers, originAllowed, takeRate };
-
