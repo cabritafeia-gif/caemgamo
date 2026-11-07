@@ -39,6 +39,7 @@ test('opening the account dialog always restores the sign-in form when signed ou
   assert.match(openAccount, /\$\('auth-forms'\)\.hidden = signedIn/);
   assert.match(openAccount, /\$\('profile-panel'\)\.hidden = !signedIn/);
   assert.match(openAccount, /showForm\('sign-in-form'\)/);
+  assert.match(html, /<form id="new-password-form"[\s\S]*?<\/form>\s*<\/div>\s*<div id="profile-panel"/, 'profile panel must be outside the hidden auth forms container');
 });
 
 test('avatar controls have a visible fallback and refresh cached message profiles', () => {
