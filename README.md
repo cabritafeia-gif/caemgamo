@@ -1,6 +1,6 @@
 # CAEMGAMO
 
-Aplicativo web CAEMGAMO para salas privadas com até 15 pessoas. Inclui chamada de áudio e vídeo, compartilhamento de tela quando o navegador oferece essa função e temas claro, escuro e azul-marinho. Com Supabase configurado, inclui contas por e-mail, perfis com avatar, comunidades, canais, convites, mensagens persistentes e controles de moderação.
+Aplicativo web CAEMGAMO para salas privadas com até 15 pessoas. Inclui chamada de áudio e vídeo, compartilhamento de tela quando o navegador oferece essa função e temas claro, escuro e azul-marinho. Com Supabase configurado, inclui contas por e-mail, recuperação por código, perfis com avatares prontos ou enviados, comunidades, canais, convites, mensagens persistentes, presentes virtuais gratuitos, denúncias e cargos com permissões configuráveis.
 
 Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon.svg](public/caemgamo-icon.svg).
 
@@ -12,7 +12,7 @@ Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon
 4. Acesse `http://localhost:4173`.
 5. Use **Convidar pessoa** para enviar o link de uma sala direta.
 
-Salas diretas funcionam sem Redis e sem cadastro. Microfone, câmera e compartilhamento podem ser ativados mesmo quando a pessoa está sozinha; a transmissão fica pronta para participantes que entrarem depois. Para ativar contas, comunidades e bate-papo persistente, siga [CONFIGURACAO_SUPABASE.md](CONFIGURACAO_SUPABASE.md). `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
+Salas diretas funcionam sem Redis e sem cadastro. Microfone, câmera e compartilhamento podem ser ativados mesmo quando a pessoa está sozinha; a transmissão fica pronta para participantes que entrarem depois. Para ativar contas, comunidades e bate-papo persistente, siga [CONFIGURACAO_SUPABASE.md](CONFIGURACAO_SUPABASE.md) e aplique as duas migrações em ordem. `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
 
 Os testes locais usam `node --test`. Os testes das políticas Postgres usam `supabase test db` e precisam de Supabase CLI e Docker.
 

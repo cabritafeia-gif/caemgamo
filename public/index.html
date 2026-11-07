@@ -52,7 +52,7 @@
           <span class="lock-icon" aria-label="Privada">⌑</span>
         </div>
         <button class="invite-button" id="copy-invite"><span>＋</span> Convidar pessoa</button>
-        <div class="community-actions community-tools"><button id="create-channel-button" disabled>＋ Criar canal</button><button id="create-invite-button" disabled>↗ Criar convite</button><button id="revoke-invite-button" disabled>⊘ Revogar convite</button><button id="manage-members-button" disabled>⚙ Gerenciar membros</button><button id="view-audit-button" disabled>▤ Ver auditoria</button><button id="edit-community-button" disabled>✎ Editar comunidade</button><button id="community-icon-button" disabled>▧ Trocar imagem</button><button id="leave-community-button" disabled>⇤ Sair da comunidade</button><input id="community-icon-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
+        <div class="community-actions community-tools"><button id="create-channel-button" disabled>＋ Criar canal</button><button id="create-invite-button" disabled>↗ Criar convite</button><button id="revoke-invite-button" disabled>⊘ Revogar convite</button><button id="manage-members-button" disabled>⚙ Gerenciar membros</button><button id="manage-roles-button" disabled>♙ Cargos personalizados</button><button id="view-reports-button" disabled>⚑ Denúncias</button><button id="view-audit-button" disabled>▤ Ver auditoria</button><button id="edit-community-button" disabled>✎ Editar comunidade</button><button id="community-icon-button" disabled>▧ Trocar imagem</button><button id="leave-community-button" disabled>⇤ Sair da comunidade</button><input id="community-icon-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
 
         <div class="side-divider"></div>
         <div class="side-title people-heading">PARTICIPANTES <span class="count-badge" id="people-count">1/15</span></div>
@@ -104,7 +104,7 @@
         <form class="message-form" id="message-form">
           <label class="sr-only" for="message-input">Escreva uma mensagem</label>
           <textarea id="message-input" rows="1" maxlength="1000" placeholder="Escreva uma mensagem…" disabled></textarea>
-          <div class="media-composer"><button id="sticker-button" type="button" disabled title="Enviar figurinha">☺ Figurinha</button><button id="record-audio-button" type="button" disabled title="Gravar áudio de até 30 segundos">♩ Gravar áudio</button><span id="recording-indicator" hidden>Gravando · até 30 s</span></div>
+          <div class="media-composer"><button id="sticker-button" type="button" disabled title="Enviar figurinha">☺ Figurinha</button><button id="gift-button" type="button" disabled title="Enviar presente virtual gratuito">🎁 Presente</button><button id="upload-audio-button" type="button" disabled title="Enviar som ou áudio de até 30 segundos">♫ Enviar som</button><input id="audio-file" type="file" accept="audio/webm,audio/ogg,audio/mp4,audio/mpeg,audio/wav" hidden><button id="record-audio-button" type="button" disabled title="Gravar áudio de até 30 segundos">♩ Gravar áudio</button><span id="recording-indicator" hidden>Gravando · até 30 s</span></div>
           <div class="composer-bottom"><span class="composer-tip">Enter para enviar · Shift + Enter para quebrar linha</span><button class="send-button" id="send-button" type="submit" disabled aria-label="Enviar mensagem">↑</button></div>
         </form>
         <div class="chat-footnote" id="chat-footnote"><span>◈</span> As mensagens são enviadas diretamente entre participantes.</div>
@@ -136,17 +136,25 @@
         </form>
         <form id="recovery-form" class="account-form" hidden>
           <label>E-mail<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
-          <button class="primary-action" type="submit">Enviar instruções</button>
+          <button class="primary-action" type="submit">Enviar código de recuperação</button>
           <button class="link-action" type="button" id="show-sign-in-from-recovery">Voltar ao login</button>
+        </form>
+        <form id="recovery-code-form" class="account-form" hidden>
+          <label>E-mail<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
+          <label>Código recebido por e-mail<input name="token" inputmode="numeric" autocomplete="one-time-code" minlength="6" maxlength="8" required></label>
+          <button class="primary-action" type="submit">Verificar código</button>
+          <button class="link-action" type="button" id="resend-recovery-code">Reenviar código</button>
+          <button class="link-action" type="button" id="show-sign-in-from-code">Voltar ao login</button>
         </form>
         <form id="new-password-form" class="account-form" hidden>
           <label>Nova senha<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
           <button class="primary-action" type="submit">Salvar nova senha</button>
         </form>
         <div id="profile-panel" hidden>
-          <div class="profile-avatar-row"><img id="profile-image" alt="Avatar do perfil" hidden><span id="profile-initial" class="profile-initial">C</span><label class="link-action upload-label">Trocar avatar<input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></label></div>
+          <div class="profile-avatar-row"><img id="profile-image" alt="Avatar do perfil" hidden><span id="profile-initial" class="profile-initial">C</span><label class="link-action upload-label">Enviar imagem<input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></label></div>
+          <div class="preset-avatar-list" aria-label="Avatares prontos"><button type="button" data-preset-avatar="fox" aria-label="Raposa">🦊</button><button type="button" data-preset-avatar="cat" aria-label="Gato">🐱</button><button type="button" data-preset-avatar="owl" aria-label="Coruja">🦉</button><button type="button" data-preset-avatar="frog" aria-label="Sapo">🐸</button><button type="button" data-preset-avatar="star" aria-label="Estrela">⭐</button><button type="button" data-preset-avatar="heart" aria-label="Coração">💜</button><button type="button" data-preset-avatar="robot" aria-label="Robô">🤖</button><button type="button" data-preset-avatar="flower" aria-label="Flor">🌼</button></div>
           <form id="profile-form" class="account-form"><label>Nome de exibição<input name="display_name" maxlength="32" required></label><label>Tema preferido<select name="theme"><option value="light">Claro</option><option value="dark">Escuro</option><option value="navy">Azul-marinho</option></select></label><button class="primary-action" type="submit">Salvar perfil</button></form>
-          <button class="link-action" id="profile-reset-password" type="button">Enviar link para trocar senha</button>
+          <button class="link-action" id="profile-reset-password" type="button">Receber código para trocar senha</button>
           <button class="link-action danger-action" id="sign-out-button" type="button">Sair da conta</button>
         </div>
       </div>

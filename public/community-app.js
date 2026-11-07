@@ -2,7 +2,7 @@
   const $ = (id) => document.getElementById(id);
   const state = {
     client: null, session: null, profile: null, communities: [], communityId: null,
-    channel: null, subscription: null, moderationSubscription: null, seenMessages: new Set(), profiles: new Map(), configured: false
+    channel: null, subscription: null, moderationSubscription: null, seenMessages: new Set(), profiles: new Map(), configured: false, recoveryEmail: ''
   };
   const requestedChannel = new URLSearchParams(location.search).get('canal') || '';
   const hashParams = new URLSearchParams(location.hash.slice(1));
@@ -33,7 +33,7 @@
   }
 
   function showForm(name) {
-    for (const id of ['sign-in-form', 'sign-up-form', 'recovery-form', 'new-password-form']) $(id).hidden = id !== name;
+    for (const id of ['sign-in-form', 'sign-up-form', 'recovery-form', 'recovery-code-form', 'new-password-form']) $(id).hidden = id !== name;
     document.querySelectorAll('#auth-forms button[type="submit"]').forEach((button) => { button.disabled = !state.configured; });
     $('profile-panel').hidden = true;
     status('');
@@ -61,6 +61,12 @@
 
   function avatarUrl(path) {
     if (!path || !state.client) return '';
+    const presets = { fox: '🦊', cat: '🐱', owl: '🦉', frog: '🐸', star: '⭐', heart: '💜', robot: '🤖', flower: '🌼' };
+    const preset = /^preset:(fox|cat|owl|frog|star|heart|robot|flower)$/.exec(path);
+    if (preset) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#5865f2"/><text x="64" y="88" text-anchor="middle" font-size="78">${presets[preset[1]]}</text></svg>`;
+      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    }
     return state.client.storage.from('avatars').getPublicUrl(path).data.publicUrl;
   }
 
@@ -76,7 +82,7 @@
     $('profile-button').title = signedIn ? 'Seu perfil' : 'Entrar ou criar conta';
     $('workspace-name').textContent = state.communities.find((item) => item.id === state.communityId)?.name || 'CAEMGAMO';
     for (const id of ['create-community-button', 'join-community-button', 'explore-community-button', 'add-community-button']) $(id).disabled = !state.configured || !signedIn;
-    for (const id of ['create-channel-button', 'create-invite-button', 'revoke-invite-button', 'manage-members-button', 'view-audit-button', 'edit-community-button', 'community-icon-button', 'leave-community-button']) $(id).disabled = !state.configured || !signedIn || !state.communityId;
+    for (const id of ['create-channel-button', 'create-invite-button', 'revoke-invite-button', 'manage-members-button', 'manage-roles-button', 'view-reports-button', 'view-audit-button', 'edit-community-button', 'community-icon-button', 'leave-community-button']) $(id).disabled = !state.configured || !signedIn || !state.communityId;
     if (signedIn && state.profile) {
       $('profile-form').elements.display_name.value = state.profile.display_name || '';
       $('profile-form').elements.theme.value = state.profile.preferred_theme || 'dark';
@@ -198,6 +204,9 @@
       const { data, error } = await state.client.storage.from('chat-media').createSignedUrl(message.media_path, 3600);
       if (!error) media = { type: 'audio', url: data.signedUrl };
     } else if (message.message_type === 'sticker') media = { type: 'sticker' };
+    else if (message.message_type === 'gift') media = { type: 'gift' };
+    if (media) media.messageId = message.id;
+    else media = { messageId: message.id };
     window.CAEMGAMO_ADD_MESSAGE?.(
       message.content, message.author_id === state.session?.user?.id,
       Date.parse(message.created_at) || Date.now(), message.author_id,
@@ -219,7 +228,7 @@
     $('chat-footnote').innerHTML = '<span>◈</span> Histórico salvo com acesso controlado pela comunidade.';
     clearChat();
     try {
-      const { data, error } = await state.client.from('messages').select('id,author_id,content,created_at').eq('channel_id', channel.id).order('created_at', { ascending: true }).limit(100);
+      const { data, error } = await state.client.from('messages').select('id,author_id,message_type,content,media_path,duration_seconds,created_at').eq('channel_id', channel.id).order('created_at', { ascending: true }).limit(100);
       if (error) throw error;
       await loadAuthors((data || []).map((item) => item.author_id));
       for (const message of data || []) await displayMessage(message);
@@ -254,6 +263,43 @@
     const sticker = stickers[Number(selected) - 1];
     if (!sticker) throw new Error('Escolha um número entre 1 e 8.');
     const { data, error } = await state.client.from('messages').insert({ channel_id: state.channel.id, author_id: state.session.user.id, message_type: 'sticker', content: sticker }).select('id,author_id,message_type,content,created_at').single();
+    if (error) throw error;
+    await displayMessage(data);
+  }
+
+  async function sendGift() {
+    if (!state.channel || !state.session?.user) throw new Error('Escolha um canal de texto primeiro.');
+    const gifts = ['🎁', '🌟', '💐', '🍰', '🧸', '🚀', '💎', '🎮'];
+    const selected = prompt(`Escolha um presente virtual gratuito:\n${gifts.map((value, index) => `${index + 1}. ${value}`).join('\n')}`, '1');
+    if (!selected) return;
+    const gift = gifts[Number(selected) - 1];
+    if (!gift) throw new Error('Escolha um número entre 1 e 8.');
+    const { data, error } = await state.client.from('messages').insert({ channel_id: state.channel.id, author_id: state.session.user.id, message_type: 'gift', content: gift }).select('id,author_id,message_type,content,created_at').single();
+    if (error) throw error;
+    await displayMessage(data);
+  }
+
+  async function sendAudioFile(file) {
+    if (!file || !state.channel || !state.session?.user) return;
+    const types = { 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' };
+    if (!types[file.type] || file.size < 1 || file.size > 10 * 1024 * 1024) throw new Error('Escolha um áudio WebM, Ogg, M4A, MP3 ou WAV com até 10 MB.');
+    const objectUrl = URL.createObjectURL(file);
+    let duration;
+    try {
+      duration = await new Promise((resolve, reject) => {
+        const audio = new Audio();
+        const timeout = setTimeout(() => reject(new Error('Não foi possível ler a duração do áudio.')), 8000);
+        audio.preload = 'metadata';
+        audio.onloadedmetadata = () => { clearTimeout(timeout); resolve(audio.duration); };
+        audio.onerror = () => { clearTimeout(timeout); reject(new Error('O arquivo não parece ser um áudio válido.')); };
+        audio.src = objectUrl;
+      });
+    } finally { URL.revokeObjectURL(objectUrl); }
+    if (!Number.isFinite(duration) || duration <= 0 || duration > 30) throw new Error('O áudio precisa durar até 30 segundos.');
+    const mediaPath = `${state.channel.id}/${state.session.user.id}/${crypto.randomUUID()}.${types[file.type]}`;
+    const { error: uploadError } = await state.client.storage.from('chat-media').upload(mediaPath, file, { contentType: file.type, upsert: false });
+    if (uploadError) throw uploadError;
+    const { data, error } = await state.client.from('messages').insert({ channel_id: state.channel.id, author_id: state.session.user.id, message_type: 'audio', content: '', media_path: mediaPath, duration_seconds: Math.ceil(duration) }).select('id,author_id,message_type,content,media_path,duration_seconds,created_at').single();
     if (error) throw error;
     await displayMessage(data);
   }
@@ -440,7 +486,7 @@
     const lines = (members || []).map((member) => `${state.profiles.get(member.user_id)?.display_name || 'Participante'} — ${member.role} — ${member.user_id}`).join('\n');
     const memberId = prompt(`Membros (copie o ID da pessoa que quer gerenciar):\n${lines}`);
     if (!memberId) return;
-    const action = prompt('Ação: papel:member, papel:mod, papel:admin, warning, mute, kick, ban, revogar, transferir')?.trim().toLowerCase();
+    const action = prompt('Ação: papel:member, papel:mod, papel:admin, cargo, warning, mute, kick, ban, revogar, transferir')?.trim().toLowerCase();
     if (!action) return;
     if (action === 'transferir') {
       if (!confirm('Transferir a propriedade desta comunidade para esta pessoa? Você passará a ser administrador.')) return;
@@ -451,6 +497,13 @@
       if (!['member', 'mod', 'admin'].includes(role)) { status('Papel inválido.', true); return; }
       const { error: roleError } = await state.client.rpc('assign_community_role', { p_community_id: state.communityId, p_user_id: memberId.trim(), p_role: role });
       if (roleError) throw roleError;
+    } else if (action === 'cargo') {
+      const { data: roles, error: rolesError } = await state.client.from('community_custom_roles').select('id,name,rank').eq('community_id', state.communityId).order('rank', { ascending: false });
+      if (rolesError) throw rolesError;
+      const roleId = prompt(`Cargos disponíveis:\n${(roles || []).map((item) => `${item.name} (nível ${item.rank}) — ${item.id}`).join('\n') || 'Nenhum cargo personalizado'}\n\nCole o ID para atribuir; deixe vazio para remover cargo personalizado:`);
+      if (roleId === null) return;
+      const { error: assignError } = await state.client.rpc('assign_community_custom_role', { p_community_id: state.communityId, p_user_id: memberId.trim(), p_role_id: roleId.trim() || null });
+      if (assignError) throw assignError;
     } else if (action === 'revogar') {
       const cases = await state.client.from('moderation_cases').select('id,action,subject_id,created_at').eq('community_id', state.communityId).eq('subject_id', memberId.trim()).is('revoked_at', null).order('created_at', { ascending: false }).limit(10);
       if (cases.error) throw cases.error;
@@ -468,6 +521,68 @@
     }
     status('Ação registrada. O banco validou a permissão e gravou a auditoria.');
     await loadCommunities(state.communityId);
+  }
+
+  async function manageRoles() {
+    if (!requireAccount() || !state.communityId) return;
+    const { data: roles, error } = await state.client.from('community_custom_roles').select('id,name,rank,permissions').eq('community_id', state.communityId).order('rank', { ascending: false });
+    if (error) throw error;
+    const list = (roles || []).map((role) => `${role.name} · nível ${role.rank} · ${role.id} · ${Object.keys(role.permissions || {}).filter((key) => role.permissions[key]).join(', ') || 'sem permissões'}`).join('\n');
+    const action = prompt(`Cargos personalizados da comunidade:\n${list || 'Nenhum cargo criado'}\n\nDigite: criar, editar, excluir ou atribuir` )?.trim().toLowerCase();
+    if (!action) return;
+    if (action === 'criar' || action === 'editar') {
+      const roleId = action === 'editar' ? prompt('ID do cargo que será editado:')?.trim() : null;
+      if (action === 'editar' && !roleId) return;
+      const current = roles?.find((role) => role.id === roleId);
+      const name = prompt('Nome do cargo (2 a 32 caracteres):', current?.name || '')?.trim();
+      if (!name) return;
+      const rank = Number(prompt('Nível: 1 = membro, 2 = moderador, 3 = administrador. Seu cargo precisa estar abaixo do seu.', String(current?.rank || 1)));
+      const keys = ['send_messages','join_voice','create_invites','manage_channels','manage_settings','moderate_members','view_audit','view_reports','report_content'];
+      const enabled = prompt(`Permissões separadas por vírgula. Opções:\n${keys.join(', ')}`, Object.keys(current?.permissions || {}).filter((key) => current.permissions[key]).join(','));
+      if (enabled === null) return;
+      const permissions = Object.fromEntries(enabled.split(',').map((key) => key.trim()).filter(Boolean).map((key) => [key, true]));
+      const { error: saveError } = await state.client.rpc('save_community_role', { p_community_id: state.communityId, p_role_id: roleId || null, p_name: name, p_rank: rank, p_permissions: permissions });
+      if (saveError) throw saveError;
+    } else if (action === 'excluir') {
+      const roleId = prompt(`ID do cargo para excluir:\n${list}`)?.trim();
+      if (!roleId || !confirm('Excluir este cargo e remover dos membros que o usam?')) return;
+      const { error: deleteError } = await state.client.rpc('delete_community_role', { p_community_id: state.communityId, p_role_id: roleId });
+      if (deleteError) throw deleteError;
+    } else if (action === 'atribuir') {
+      const userId = prompt('ID da pessoa para receber o cargo:')?.trim();
+      const roleId = prompt(`ID do cargo (deixe vazio para voltar ao papel padrão):\n${list}`);
+      if (!userId || roleId === null) return;
+      const { error: assignError } = await state.client.rpc('assign_community_custom_role', { p_community_id: state.communityId, p_user_id: userId, p_role_id: roleId.trim() || null });
+      if (assignError) throw assignError;
+    } else { status('Escolha criar, editar, excluir ou atribuir.', true); return; }
+    status('Cargos atualizados. As permissões e a hierarquia foram validadas pelo banco.');
+  }
+
+  async function reportMessage(messageId) {
+    const reason = prompt('Por que deseja denunciar esta mensagem? (3 a 500 caracteres)');
+    if (reason === null) return;
+    const { error } = await state.client.rpc('report_community_message', { p_message_id: messageId, p_reason: reason.trim() });
+    if (error) throw error;
+    window.CAEMGAMO_TOAST?.('Denúncia enviada para a equipe da comunidade.');
+  }
+
+  async function viewReports() {
+    if (!requireAccount() || !state.communityId) return;
+    const { data: canView, error: permissionError } = await state.client.rpc('community_has_permission', { p_community_id: state.communityId, p_permission: 'view_reports' });
+    if (permissionError) throw permissionError;
+    if (!canView) throw new Error('Sua conta não tem permissão para analisar denúncias.');
+    const { data, error } = await state.client.from('message_reports').select('id,reported_user_id,reason,status,created_at').eq('community_id', state.communityId).eq('status', 'open').order('created_at', { ascending: false }).limit(50);
+    if (error) throw error;
+    await loadAuthors((data || []).map((report) => report.reported_user_id));
+    const lines = (data || []).map((report) => `${report.id} · ${state.profiles.get(report.reported_user_id)?.display_name || 'Participante'} · ${report.reason}`);
+    if (!lines.length) { status('Não há denúncias abertas.'); return; }
+    const reportId = prompt(`Denúncias abertas (copie o ID para analisar):\n${lines.join('\n')}`)?.trim();
+    if (!reportId) return;
+    const decision = prompt('Resultado: reviewed, actioned ou dismissed', 'reviewed')?.trim().toLowerCase();
+    if (!['reviewed','actioned','dismissed'].includes(decision)) { status('Resultado inválido.', true); return; }
+    const { error: resolveError } = await state.client.rpc('resolve_community_message_report', { p_report_id: reportId, p_status: decision });
+    if (resolveError) throw resolveError;
+    status('Denúncia atualizada e registrada na auditoria.');
   }
 
   async function viewAudit() {
@@ -505,6 +620,24 @@
     if (error) throw error;
     await loadProfile();
     status('Avatar atualizado.');
+  }
+
+  async function changePresetAvatar(preset) {
+    const allowed = ['fox','cat','owl','frog','star','heart','robot','flower'];
+    if (!allowed.includes(preset) || !state.session?.user) return;
+    const { error } = await state.client.from('profiles').update({ avatar_path: `preset:${preset}` }).eq('id', state.session.user.id);
+    if (error) throw error;
+    await loadProfile();
+    status('Avatar atualizado.');
+  }
+
+  async function requestRecoveryCode(email) {
+    state.recoveryEmail = String(email || '').trim();
+    $('recovery-code-form').elements.email.value = state.recoveryEmail;
+    try { await state.client.auth.resetPasswordForEmail(state.recoveryEmail, { redirectTo: `${location.origin}/?recuperar=1` }); }
+    catch { /* resposta igual para endereços válidos ou não cadastrados */ }
+    showForm('recovery-code-form');
+    status('Se houver uma conta para esse endereço, enviaremos um código de recuperação por e-mail.');
   }
 
   function openAccount() {
@@ -566,6 +699,7 @@
     $('show-sign-in').addEventListener('click', () => showForm('sign-in-form'));
     $('show-recovery').addEventListener('click', () => showForm('recovery-form'));
     $('show-sign-in-from-recovery').addEventListener('click', () => showForm('sign-in-form'));
+    $('show-sign-in-from-code').addEventListener('click', () => showForm('sign-in-form'));
     $('sign-in-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
       try {
         const { error } = await state.client.auth.signInWithPassword({ email: values.get('email'), password: values.get('password') });
@@ -584,11 +718,21 @@
       } catch (error) { status(friendlyError(error), true); }
     }));
     $('recovery-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
-      const email = values.get('email');
-      try { await state.client.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?recuperar=1` }); }
-      catch { /* resposta genérica para evitar revelar se o e-mail existe */ }
-      status('Se houver uma conta para esse endereço, enviaremos instruções de recuperação.');
+      await requestRecoveryCode(values.get('email'));
     }));
+    $('recovery-code-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
+      const email = String(values.get('email')).trim();
+      const token = String(values.get('token')).trim();
+      try {
+        const { error } = await state.client.auth.verifyOtp({ email, token, type: 'recovery' });
+        if (error) throw error;
+        state.recoveryEmail = email;
+        history.replaceState({}, '', `${location.pathname}?recuperar=1`);
+        showForm('new-password-form');
+        status('Código validado. Escolha uma nova senha.');
+      } catch (error) { status(friendlyError(error), true); }
+    }));
+    $('resend-recovery-code').addEventListener('click', () => requestRecoveryCode($('recovery-code-form').elements.email.value));
     $('new-password-form').addEventListener('submit', (event) => runAccountForm(event, async (values) => {
       const password = values.get('password');
       try {
@@ -617,9 +761,7 @@
       event.target.value = '';
     });
     $('profile-reset-password').addEventListener('click', async () => {
-      try { await state.client.auth.resetPasswordForEmail(state.session.user.email, { redirectTo: `${location.origin}/?recuperar=1` }); }
-      catch { /* manter resposta genérica */ }
-      status('Se a conta puder receber e-mail, enviaremos as instruções de troca de senha.');
+      await requestRecoveryCode(state.session.user.email);
     });
     $('sign-out-button').addEventListener('click', async () => {
       const { error } = await state.client.auth.signOut();
@@ -634,6 +776,8 @@
     $('create-channel-button').addEventListener('click', () => createChannel().catch((error) => status(friendlyError(error), true)));
     $('create-invite-button').addEventListener('click', () => createInvite().catch((error) => status(friendlyError(error), true)));
     $('manage-members-button').addEventListener('click', () => manageMembers().catch((error) => status(friendlyError(error), true)));
+    $('manage-roles-button').addEventListener('click', () => manageRoles().catch((error) => status(friendlyError(error), true)));
+    $('view-reports-button').addEventListener('click', () => viewReports().catch((error) => status(friendlyError(error), true)));
     $('view-audit-button').addEventListener('click', () => viewAudit().catch((error) => status(friendlyError(error), true)));
     $('revoke-invite-button').addEventListener('click', () => revokeInvite().catch((error) => status(friendlyError(error), true)));
     $('edit-community-button').addEventListener('click', () => editCommunity().catch((error) => status(friendlyError(error), true)));
@@ -645,7 +789,19 @@
     });
     $('leave-community-button').addEventListener('click', () => leaveCommunity().catch((error) => status(friendlyError(error), true)));
     $('sticker-button').addEventListener('click', () => sendSticker().catch((error) => window.CAEMGAMO_TOAST?.(friendlyError(error))));
+    $('gift-button').addEventListener('click', () => sendGift().catch((error) => window.CAEMGAMO_TOAST?.(friendlyError(error))));
+    $('upload-audio-button').addEventListener('click', () => $('audio-file').click());
+    $('audio-file').addEventListener('change', async (event) => {
+      try { await sendAudioFile(event.target.files?.[0]); }
+      catch (error) { window.CAEMGAMO_TOAST?.(friendlyError(error)); }
+      event.target.value = '';
+    });
     $('record-audio-button').addEventListener('click', () => toggleAudioRecording().catch((error) => window.CAEMGAMO_TOAST?.(friendlyError(error))));
+    $('chat-body').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-report-message]');
+      if (button) reportMessage(button.dataset.reportMessage).catch((error) => window.CAEMGAMO_TOAST?.(friendlyError(error)));
+    });
+    document.querySelectorAll('[data-preset-avatar]').forEach((button) => button.addEventListener('click', () => changePresetAvatar(button.dataset.presetAvatar).catch((error) => status(friendlyError(error), true))));
   }
 
   window.CaemgamoCommunity = {
@@ -682,11 +838,15 @@
         openAccount();
       }
       if (requestedChannel && !state.session?.user) openAccount();
-      state.client.auth.onAuthStateChange((_event, session) => {
+      state.client.auth.onAuthStateChange((event, session) => {
         state.session = session;
+        if (event === 'PASSWORD_RECOVERY') {
+          $('account-dialog').hidden = false;
+          showForm('new-password-form');
+        }
         queueMicrotask(() => settleAuth().catch((authError) => status(friendlyError(authError), true)));
       });
-      const recovery = new URLSearchParams(location.search).get('recuperar') === '1' || hashParams.get('type') === 'recovery';
+      const recovery = Boolean(state.session?.user) && (new URLSearchParams(location.search).get('recuperar') === '1' || hashParams.get('type') === 'recovery');
       if (recovery) { $('account-dialog').hidden = false; showForm('new-password-form'); }
       if (requestedChannel && state.session?.user) {
         const { data: voiceChannel, error: voiceError } = await state.client.from('channels').select('id,name,community_id,kind').eq('id', requestedChannel).maybeSingle();

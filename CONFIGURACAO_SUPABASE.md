@@ -5,9 +5,22 @@ O código está pronto para Supabase, mas cadastro, comunidades e mensagens pers
 ## 1. Criar o backend
 
 1. Crie um projeto Supabase.
-2. No **SQL Editor**, abra e execute [a migração](supabase/migrations/202611070001_caemgamo_communities.sql). Ela cria perfis, comunidades, canais, convites, mensagens, controles de moderação, auditoria, buckets de mídia e políticas RLS.
-3. Em **Authentication → URL Configuration**, configure a URL pública do CAEMGAMO como **Site URL**. Inclua os endereços locais e todas as origens usadas para testar como URLs de redirecionamento permitidas.
-4. Em **Authentication → Email**, habilite confirmação de e-mail e configure um provedor SMTP para entrega consistente de confirmações e recuperação de senha.
+2. No **SQL Editor**, abra e execute [a migração inicial](supabase/migrations/202611070001_caemgamo_communities.sql). Ela cria perfis, comunidades, canais, convites, mensagens, controles de moderação, auditoria, buckets de mídia e políticas RLS.
+3. Depois, execute [a migração complementar](supabase/migrations/202611070002_caemgamo_complete_features.sql). Ela habilita cargos personalizados, denúncias, presentes virtuais gratuitos e avatares prontos. Ela é necessária para a versão atual do site.
+4. Em **Authentication → URL Configuration**, configure a URL pública do CAEMGAMO como **Site URL**. Inclua os endereços locais e todas as origens usadas para testar como URLs de redirecionamento permitidas.
+5. Em **Authentication → Email**, habilite confirmação de e-mail e configure um provedor SMTP para entrega consistente de confirmações e recuperação de senha.
+
+Para a recuperação por código, abra **Authentication → Email Templates → Reset Password** e inclua `{{ .Token }}` no corpo do modelo. Você pode manter o link alternativo:
+
+```html
+<h2>Recuperar senha do CAEMGAMO</h2>
+<p>Digite este código na tela de recuperação:</p>
+<p><strong>{{ .Token }}</strong></p>
+<p>Ou <a href="{{ .ConfirmationURL }}">abra o link para redefinir a senha</a>.</p>
+<p>Se você não pediu a troca, ignore esta mensagem.</p>
+```
+
+O app valida o código pelo fluxo de recuperação do Supabase. O link de recuperação continua aceito quando o template o inclui. O código e o link são de uso único e têm validade definida nas configurações de Auth do projeto.
 
 Use a URL do projeto e uma chave **Publishable** (ou a chave pública legada `anon`) na aplicação. Não use `service_role`/`secret` no navegador, no Render ou no repositório. A chave pública identifica o projeto; o acesso aos dados é controlado pelas políticas RLS.
 
@@ -24,7 +37,7 @@ Salve e faça um novo deploy da versão do CAEMGAMO. O endpoint `/config.json` p
 
 ## 3. Testar a base de dados
 
-Com Docker e Supabase CLI instalados, execute `supabase start` e depois `supabase test db`. Os testes em `supabase/tests/` verificam perfis, envio de mensagens, limite anti-spam, bloqueio de mute/ban, expiração e hierarquia de papéis. Para testar envio de e-mail, é necessário configurar SMTP e usar uma conta de teste.
+Com Docker e Supabase CLI instalados, execute `supabase start` e depois `supabase test db`. Os testes em `supabase/tests/` verificam perfis, envio de mensagens e presentes, limite anti-spam, bloqueio de mute/ban, expiração, cargos e denúncias. Para testar envio de e-mail, é necessário configurar SMTP e usar uma conta de teste.
 
 ## Limites conhecidos
 

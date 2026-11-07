@@ -96,7 +96,7 @@ function updateChatState() {
   const communityChat = window.CaemgamoCommunity?.canSend === true;
   ui.messageInput.disabled = !available && !communityChat;
   ui.sendButton.disabled = (!available && !communityChat) || !ui.messageInput.value.trim();
-  for (const id of ['sticker-button', 'record-audio-button']) if ($(id)) $(id).disabled = !communityChat;
+  for (const id of ['sticker-button', 'gift-button', 'upload-audio-button', 'record-audio-button']) if ($(id)) $(id).disabled = !communityChat;
 }
 
 function updateStage() {
@@ -475,11 +475,22 @@ function addMessage(text, mine, at = Date.now(), senderId = '', displayName = ''
   } else if (media?.type === 'sticker') {
     bubble.classList.add('sticker-bubble');
     bubble.textContent = text;
+  } else if (media?.type === 'gift') {
+    bubble.classList.add('gift-bubble');
+    bubble.textContent = `🎁 ${text}`;
   } else bubble.textContent = text;
   const time = document.createElement('span');
   time.className = 'message-time';
   time.textContent = new Date(at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   row.append(avatar, author, bubble, time);
+  if (media?.messageId && !mine) {
+    const report = document.createElement('button');
+    report.type = 'button';
+    report.className = 'message-report-button';
+    report.dataset.reportMessage = media.messageId;
+    report.textContent = 'Denunciar';
+    row.append(report);
+  }
   ui.chatBody.append(row);
   ui.chatBody.scrollTop = ui.chatBody.scrollHeight;
   if (!mine && window.matchMedia('(max-width: 820px)').matches && !ui.layout.classList.contains('show-chat')) {
