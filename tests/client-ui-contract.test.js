@@ -32,4 +32,5 @@ test('voice controls expose recovery for blocked playback and ICE reconnection',
   assert.match(app, /createOffer\(iceRestart \? \{ iceRestart: true \} : undefined\)/);
   assert.match(app, /type: 'media-state'/);
   assert.match(app, /data\.type === 'media-state'/);
+  assert.match(app, /setAttribute\('aria-pressed', String\(active\)\)/);
 });

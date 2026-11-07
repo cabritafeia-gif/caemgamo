@@ -267,8 +267,11 @@ async function syncPeerTracks(peer) {
 }
 
 async function syncTrackToPeers(kind, track) {
-  const updates = [...peers.values()].map((peer) => peer.senders[kind].replaceTrack(track).catch(() => {}));
-  await Promise.all(updates);
+  const updates = [...peers.values()].map((peer) => peer.senders[kind].replaceTrack(track));
+  const results = await Promise.allSettled(updates);
+  if (results.some((result) => result.status === 'rejected')) {
+    throw Object.assign(new Error('A faixa não foi enviada aos participantes.'), { name: 'TrackSyncError' });
+  }
 }
 
 async function startOffer(peer, iceRestart = false) {
@@ -329,8 +332,8 @@ function bindChannel(peer, channel) {
     updateChatState();
     ui.systemMessage.textContent = 'Conexão segura estabelecida. As mensagens são enviadas diretamente às pessoas da sala.';
   };
-  channel.onclose = updateChatState;
-  channel.onerror = updateChatState;
+  channel.onclose = () => { peer.mediaState = null; updatePeerTile(peer); updateChatState(); };
+  channel.onerror = () => { peer.mediaState = null; updatePeerTile(peer); updateChatState(); };
   channel.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
@@ -491,6 +494,7 @@ async function handleSignal(peerId, data) {
 function updateMediaButton(id, active, onText, offText) {
   const button = $(id);
   button.classList.toggle('active', active);
+  button.setAttribute('aria-pressed', String(active));
   button.lastElementChild.textContent = active ? onText : offText;
 }
 
@@ -510,6 +514,9 @@ function broadcastMediaState() {
 
 async function toggleMic() {
   if (!roomJoined) return;
+  const previousTrack = audioTrack;
+  const previousEnabled = Boolean(previousTrack?.readyState === 'live' && previousTrack.enabled);
+  let acquired = false;
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
     if (!audioTrack || audioTrack.readyState !== 'live') {
@@ -526,6 +533,7 @@ async function toggleMic() {
         showToast('O microfone foi desconectado. Verifique o dispositivo e ative-o novamente.');
       }, { once: true });
       audioTrack.enabled = true;
+      acquired = true;
     } else {
       audioTrack.enabled = !audioTrack.enabled;
     }
@@ -534,12 +542,20 @@ async function toggleMic() {
     updateMediaButton('mic-button', audioTrack.enabled, 'Microfone ligado', 'Microfone desligado');
     showToast(audioTrack.enabled ? 'Microfone ligado.' : 'Microfone desligado.');
   } catch (error) {
+    if (acquired) { audioTrack?.stop(); audioTrack = null; }
+    else if (audioTrack?.readyState === 'live') audioTrack.enabled = previousEnabled;
+    await syncTrackToPeers('audio', previousEnabled && previousTrack?.readyState === 'live' ? previousTrack : null).catch(() => {});
+    updateMediaButton('mic-button', previousEnabled, 'Microfone ligado', 'Microfone desligado');
+    broadcastMediaState();
     showToast(mediaErrorMessage(error, 'microfone'));
   }
 }
 
 async function toggleCamera() {
   if (!roomJoined) return;
+  const previousTrack = cameraTrack;
+  const previousEnabled = Boolean(previousTrack?.readyState === 'live' && previousTrack.enabled);
+  let acquired = false;
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('Conexão segura necessária'), { name: 'InsecureContextError' });
     if (!cameraTrack || cameraTrack.readyState !== 'live') {
@@ -557,6 +573,7 @@ async function toggleCamera() {
         showToast('A câmera foi desconectada. Verifique o dispositivo e ative-a novamente.');
       }, { once: true });
       cameraTrack.enabled = true;
+      acquired = true;
     } else {
       cameraTrack.enabled = !cameraTrack.enabled;
     }
@@ -565,11 +582,18 @@ async function toggleCamera() {
     updateMediaButton('camera-button', Boolean(cameraTrack?.enabled), 'Câmera ligada', 'Câmera desligada');
     updateStage();
   } catch (error) {
+    if (acquired) { cameraTrack?.stop(); cameraTrack = null; }
+    else if (cameraTrack?.readyState === 'live') cameraTrack.enabled = previousEnabled;
+    if (!screenTrack) await syncTrackToPeers('video', previousEnabled && previousTrack?.readyState === 'live' ? previousTrack : null).catch(() => {});
+    updateMediaButton('camera-button', previousEnabled, 'Câmera ligada', 'Câmera desligada');
+    broadcastMediaState();
+    updateStage();
     showToast(mediaErrorMessage(error, 'câmera'));
   }
 }
 
 function mediaErrorMessage(error, device) {
+  if (error.name === 'TrackSyncError') return `O ${device} foi ativado, mas não conseguiu chegar às outras pessoas. Verifique a conexão e tente novamente.`;
   if (error.name === 'InsecureContextError') return `O ${device} exige HTTPS ou localhost. Abra o aplicativo pela conexão segura.`;
   if (error.name === 'NotAllowedError' || error.name === 'SecurityError') return `Acesso ao ${device} negado. Clique no cadeado ao lado do endereço, permita o dispositivo e tente novamente.`;
   if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') return `Nenhum ${device} foi encontrado neste dispositivo.`;
@@ -580,7 +604,11 @@ function mediaErrorMessage(error, device) {
 
 async function toggleScreen() {
   if (!roomJoined) return;
-  if (screenTrack) { await stopScreenShare(); return; }
+  if (screenTrack) {
+    try { await stopScreenShare(); }
+    catch { showToast('A transmissão parou, mas a câmera não conseguiu retomar o envio. Tente alterná-la novamente.'); }
+    return;
+  }
   if (!navigator.mediaDevices?.getDisplayMedia || !window.isSecureContext) {
     showToast(window.isSecureContext ? 'Este navegador não permite compartilhar a tela.' : 'A tela só pode ser compartilhada em uma conexão HTTPS segura.');
     return;
@@ -588,7 +616,12 @@ async function toggleScreen() {
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
     screenTrack = stream.getVideoTracks()[0];
-    await syncTrackToPeers('video', screenTrack);
+    try { await syncTrackToPeers('video', screenTrack); }
+    catch (error) {
+      screenTrack?.stop();
+      screenTrack = null;
+      throw error;
+    }
     broadcastMediaState();
     updateMediaButton('share-button', true, 'Parar transmissão', 'Compartilhar tela');
     screenTrack.addEventListener('ended', () => stopScreenShare().catch(() => {}), { once: true });
@@ -606,10 +639,12 @@ async function stopScreenShare() {
   const track = screenTrack;
   screenTrack = null;
   track.stop();
-  await syncTrackToPeers('video', cameraTrack?.enabled ? cameraTrack : null);
-  broadcastMediaState();
-  updateMediaButton('share-button', false, 'Parar transmissão', 'Compartilhar tela');
-  updateStage();
+  try { await syncTrackToPeers('video', cameraTrack?.enabled ? cameraTrack : null); }
+  finally {
+    broadcastMediaState();
+    updateMediaButton('share-button', false, 'Parar transmissão', 'Compartilhar tela');
+    updateStage();
+  }
 }
 
 function startClock() {
