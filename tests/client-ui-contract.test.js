@@ -59,6 +59,10 @@ test('voice controls expose recovery for blocked playback and ICE reconnection',
   assert.match(app, /createOffer\(iceRestart \? \{ iceRestart: true \} : undefined\)/);
   assert.match(app, /peer\.connectionTimer = setTimeout\([\s\S]*?15_000\)/);
   assert.match(app, /clearTimeout\(peer\.connectionTimer\)/);
+  assert.match(app, /function hasRelayIceServers\(\)/);
+  assert.match(app, /setConfiguration\(\{ \.\.\.peer\.pc\.getConfiguration\(\), iceServers, iceTransportPolicy: 'relay' \}\)/);
+  assert.match(app, /Tentando conectar áudio e vídeo pelo relay TURN/);
+  assert.doesNotMatch(app, /if \(clientId > peer\.id\) return/);
   assert.match(app, /ui\.systemMessage\.textContent = `Falha na chamada: \$\{reason\}`/);
   assert.match(app, /peer\.ui\.status\.textContent = 'Não conectou · confira a rede e tente entrar novamente'/);
   assert.match(app, /type: 'media-state'/);

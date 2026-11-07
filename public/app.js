@@ -512,7 +512,7 @@ function ensurePeer(peerId, initiator = false) {
     id: peerId, pc, senders: { audio: audioSender, video: videoSender },
     channel: null, pendingCandidates: [], remoteStream: new MediaStream(), ui: createPeerTile(peerId),
     polite: clientId > peerId, makingOffer: false, ignoreOffer: false, mediaState: null,
-    iceRestarts: 0, iceRestartTimer: null, connectionTimer: null, closed: false
+    iceRestarts: 0, iceRestartTimer: null, connectionTimer: null, relayFallback: false, closed: false
   };
   peers.set(peerId, peer);
   updatePeerTile(peer);
@@ -558,8 +558,12 @@ function ensurePeer(peerId, initiator = false) {
   peer.connectionTimer = setTimeout(() => {
     peer.connectionTimer = null;
     if (peer.closed || peer.pc.connectionState === 'connected') return;
-    peer.ui.status.textContent = 'A conexão está demorando · tentando novamente…';
-    ui.systemMessage.textContent = 'A conexão de áudio e vídeo está demorando. O app está tentando outra negociação de rede; se falhar, confira a rede e tente sair e entrar novamente.';
+    if (!enableRelayFallback(peer)) {
+      peer.ui.status.textContent = 'A conexão está demorando · tentando novamente…';
+      ui.systemMessage.textContent = hasRelayIceServers()
+        ? 'A conexão de áudio e vídeo está demorando. O app está tentando outra negociação; se falhar, confira sua rede e tente entrar novamente.'
+        : 'A conexão direta está demorando e o servidor não forneceu relay TURN. Pode ser necessário revisar a configuração TURN para esta sala.';
+    }
     scheduleIceRestart(peer, true);
   }, 15_000);
   syncPeerTracks(peer).catch(() => {});
@@ -599,10 +603,13 @@ async function startOffer(peer, iceRestart = false) {
 
 function scheduleIceRestart(peer, immediate = false) {
   if (peer.closed || peer.iceRestartTimer) return;
-  if (clientId > peer.id) return;
+  // Qualquer lado pode pedir uma renegociação. handleSignal resolve ofertas simultâneas.
+  if (peer.iceRestarts >= 2 && !peer.relayFallback) enableRelayFallback(peer);
   if (peer.iceRestarts >= 3) {
     peer.ui.status.textContent = 'Não conectou · confira a rede e tente entrar novamente';
-    ui.systemMessage.textContent = 'Não foi possível estabelecer áudio e vídeo. Confira a conexão com a internet e tente sair e entrar novamente. Se continuar, a rede pode estar bloqueando WebRTC/TURN.';
+    ui.systemMessage.textContent = hasRelayIceServers()
+      ? 'A conexão direta e a tentativa pelo relay TURN falharam. Confira a rede e tente sair e entrar novamente.'
+      : 'A conexão direta falhou e esta sala não recebeu credenciais TURN. Revise a configuração TURN no servidor e tente novamente.';
     setConnection('Mídia interrompida · verifique a rede e tente novamente', 'error');
     showToast('A conexão de áudio e vídeo foi interrompida. Saia e entre novamente na sala.');
     return;
@@ -633,6 +640,28 @@ function scheduleIceRestart(peer, immediate = false) {
       } else scheduleIceRestart(peer, true);
     }
   }, delay);
+}
+
+function hasRelayIceServers() {
+  return iceServers.some((server) => {
+    const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+    return Boolean(server?.username && server?.credential && urls.some((url) => typeof url === 'string' && /^turns?:/i.test(url)));
+  });
+}
+
+function enableRelayFallback(peer) {
+  if (peer.closed || peer.relayFallback || !hasRelayIceServers()) return false;
+  try {
+    peer.pc.setConfiguration({ ...peer.pc.getConfiguration(), iceServers, iceTransportPolicy: 'relay' });
+    peer.relayFallback = true;
+    peer.iceRestarts = 0;
+    peer.ui.status.textContent = 'Conexão direta indisponível · tentando relay TURN…';
+    ui.systemMessage.textContent = 'A conexão direta não foi estabelecida. Tentando conectar áudio e vídeo pelo relay TURN.';
+    return true;
+  } catch (error) {
+    console.warn('Não foi possível alternar para relay TURN:', error.message);
+    return false;
+  }
 }
 
 function bindChannel(peer, channel) {

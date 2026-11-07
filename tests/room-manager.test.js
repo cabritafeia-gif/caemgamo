@@ -25,11 +25,17 @@ test('two participants exchange WebRTC signaling and leave notifications', async
   assert.deepEqual(await manager.joinMemory(first, 'signaling-test'), { count: 1 });
   assert.deepEqual(await manager.joinMemory(second, 'signaling-test'), { count: 2 });
   assert.equal(delivered.find(({ id, message }) => id === first.id && message.type === 'joined').message.turnAvailable, false);
-  assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-joined' && message.peerId === second.id));
+  assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-joined' && message.peerId === second.id && message.initiator));
 
   const offer = { description: { type: 'offer', sdp: 'test-sdp' } };
   await manager.signal(first, { to: second.id, payload: offer });
   assert.ok(delivered.some(({ id, message }) => id === second.id && message.type === 'signal' && message.from === first.id && message.data.description.sdp === 'test-sdp'));
+  const answer = { description: { type: 'answer', sdp: 'test-answer' } };
+  await manager.signal(second, { to: first.id, payload: answer });
+  assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'signal' && message.from === second.id && message.data.description.sdp === 'test-answer'));
+  const candidate = { candidate: { candidate: 'candidate:test' } };
+  await manager.signal(first, { to: second.id, payload: candidate });
+  assert.ok(delivered.some(({ id, message }) => id === second.id && message.type === 'signal' && message.data?.candidate?.candidate === 'candidate:test'));
 
   await manager.leave(second);
   assert.ok(delivered.some(({ id, message }) => id === first.id && message.type === 'peer-left' && message.peerId === second.id));
