@@ -1,4 +1,4 @@
-const ROOM_LIMIT = 2;
+const ROOM_LIMIT = 15;
 const MEMBER_TTL_MS = 90_000;
 const HEARTBEAT_TTL_MS = MEMBER_TTL_MS;
 
@@ -89,14 +89,12 @@ class RoomManager {
 
       room.clients.set(client.id, client);
       client.room = roomName;
-      this.send(client, { type: 'joined', room: roomName, count, iceServers: this.getIceServers(client.id) });
-
+      this.send(client, {
+        type: 'joined', room: roomName, clientId: client.id, count,
+        participants: existing, iceServers: this.getIceServers(client.id)
+      });
       if (existing.length) {
-        const otherId = String(existing[0]);
-        this.send(client, { type: 'peer-joined', initiator: client.id < otherId });
-        await this.redis.publish(room.channel, JSON.stringify({
-          type: 'peer-joined', from: client.id, initiator: otherId < client.id
-        }));
+        await this.redis.publish(room.channel, JSON.stringify({ type: 'peer-joined', from: client.id }));
       }
       return { full: false };
     });
@@ -109,11 +107,12 @@ class RoomManager {
     room.set(client.id, client);
     this.memoryRooms.set(roomName, room);
     client.room = roomName;
-    this.send(client, { type: 'joined', room: roomName, count: room.size, iceServers: this.getIceServers(client.id) });
-    if (existing.length) {
-      const other = existing[0];
-      this.send(client, { type: 'peer-joined', initiator: client.id < other.id });
-      this.send(other, { type: 'peer-joined', initiator: other.id < client.id });
+    this.send(client, {
+      type: 'joined', room: roomName, clientId: client.id, count: room.size,
+      participants: existing.map((other) => other.id), iceServers: this.getIceServers(client.id)
+    });
+    for (const other of existing) {
+      this.send(other, { type: 'peer-joined', peerId: client.id, initiator: other.id < client.id });
     }
     return { full: false };
   }
@@ -127,7 +126,7 @@ class RoomManager {
       const room = this.memoryRooms.get(roomName);
       if (room) {
         room.delete(client.id);
-        for (const peer of room.values()) this.send(peer, { type: 'peer-left' });
+        for (const peer of room.values()) this.send(peer, { type: 'peer-left', peerId: client.id, count: room.size });
         if (room.size === 0) this.memoryRooms.delete(roomName);
       }
       return;
@@ -138,8 +137,8 @@ class RoomManager {
       room?.clients.delete(client.id);
       if (this.isReady) {
         try {
-          await this.redis.eval(LEAVE_SCRIPT, { keys: [this.roomKey(roomName)], arguments: [client.id] });
-          await this.redis.publish(room?.channel || this.channelName(roomName), JSON.stringify({ type: 'peer-left', from: client.id }));
+          const count = Number(await this.redis.eval(LEAVE_SCRIPT, { keys: [this.roomKey(roomName)], arguments: [client.id] }));
+          await this.redis.publish(room?.channel || this.channelName(roomName), JSON.stringify({ type: 'peer-left', from: client.id, count }));
         } catch (error) {
           this.logger.warn('Falha ao remover participante da sala:', error.message);
         }
@@ -150,15 +149,20 @@ class RoomManager {
 
   async signal(client, data) {
     if (!client.room) return;
+    const targetId = String(data?.to || '');
+    const signalData = data?.payload;
+    if (!targetId || !signalData || typeof signalData !== 'object' || Array.isArray(signalData)) return;
     if (!this.redisUrl) {
       const room = this.memoryRooms.get(client.room);
-      for (const peer of room?.values() || []) {
-        if (peer !== client) this.send(peer, { type: 'signal', data });
-      }
+      const peer = room?.get(targetId);
+      if (peer && peer !== client) this.send(peer, { type: 'signal', from: client.id, data: signalData });
       return;
     }
     if (!this.isReady) throw new Error('O serviço de salas está reconectando.');
-    await this.redis.publish(this.channelName(client.room), JSON.stringify({ type: 'signal', from: client.id, data }));
+    if (!(await this.redis.hExists(this.roomKey(client.room), targetId))) return;
+    await this.redis.publish(this.channelName(client.room), JSON.stringify({
+      type: 'signal', from: client.id, to: targetId, data: signalData
+    }));
   }
 
   async refresh(client) {
@@ -195,8 +199,18 @@ class RoomManager {
     try { message = JSON.parse(rawMessage); } catch { return; }
     const room = this.localRooms.get(roomName);
     if (!room) return;
+    if (message.type === 'signal') {
+      const recipient = room.clients.get(message.to);
+      if (recipient && recipient.id !== message.from) this.send(recipient, message);
+      return;
+    }
     for (const client of room.clients.values()) {
-      if (client.id !== message.from) this.send(client, message);
+      if (client.id === message.from) continue;
+      if (message.type === 'peer-joined') {
+        this.send(client, { type: 'peer-joined', peerId: message.from, initiator: client.id < message.from });
+      } else if (message.type === 'peer-left') {
+        this.send(client, { type: 'peer-left', peerId: message.from, count: message.count });
+      }
     }
   }
 

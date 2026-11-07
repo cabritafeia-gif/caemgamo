@@ -183,7 +183,7 @@ function consume(client, chunk) {
 
 async function handleMessage(client, message) {
   if (message.type === 'join') {
-    if (!takeRate(`join:${client.ip}`, 12, 60_000)) { send(client, { type: 'error', message: 'Muitas tentativas. Aguarde um minuto e tente novamente.' }); return; }
+    if (!takeRate(`join:${client.ip}`, 30, 60_000)) { send(client, { type: 'error', message: 'Muitas tentativas. Aguarde um minuto e tente novamente.' }); return; }
     const roomName = String(message.room || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64);
     if (!roomName) { send(client, { type: 'error', message: 'Código de sala inválido.' }); return; }
     let result;
@@ -196,7 +196,7 @@ async function handleMessage(client, message) {
     const now = Date.now();
     if (now - client.signalWindow >= 10_000) { client.signalWindow = now; client.signalCount = 0; }
     client.signalCount++;
-    if (client.signalCount > 120) { client.socket.destroy(); return; }
+    if (client.signalCount > 800) { client.socket.destroy(); return; }
     if (!message.data || typeof message.data !== 'object' || Array.isArray(message.data)) return;
     await roomManager.signal(client, message.data);
   }

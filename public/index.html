@@ -26,6 +26,7 @@
         <span id="connection-label">Conectando à sala…</span>
       </div>
       <button class="icon-button install-button" id="install-button" hidden title="Instalar aplicativo" aria-label="Instalar aplicativo">⇩</button>
+      <label class="theme-picker" title="Escolher tema"><span aria-hidden="true">◐</span><select id="theme-select" aria-label="Escolher tema"><option value="dark">Escuro</option><option value="light">Claro</option><option value="navy">Azul-marinho</option></select></label>
       <button class="avatar" id="profile-button" title="Seu perfil">V</button>
     </header>
 
@@ -50,9 +51,9 @@
         <button class="invite-button" id="copy-invite"><span>＋</span> Convidar pessoa</button>
 
         <div class="side-divider"></div>
-        <div class="side-title people-heading">PARTICIPANTES <span class="count-badge" id="people-count">1</span></div>
+        <div class="side-title people-heading">PARTICIPANTES <span class="count-badge" id="people-count">1/15</span></div>
         <div class="person-row"><span class="person-avatar self-avatar">V</span><span class="person-name">Você</span><span class="self-tag">você</span></div>
-        <div class="person-row" id="guest-person" hidden><span class="person-avatar guest-avatar">?</span><span class="person-name">Convidado</span><span class="person-status"></span></div>
+        <div id="participant-list" aria-live="polite"></div>
 
         <div class="sidebar-note"><span class="note-spark">✦</span><div><strong>Convide seu grupo</strong><p>Compartilhe a sala para conversar, jogar ou mostrar sua tela.</p></div></div>
         <div class="sidebar-bottom"><span class="secure-icon">◈</span> Conexão ponto a ponto</div>
@@ -65,7 +66,7 @@
         </div>
 
         <section class="stage" id="stage">
-          <video id="remote-video" autoplay playsinline></video>
+          <div class="media-grid" id="media-grid" aria-label="Participantes da sala"></div>
           <div class="stage-placeholder" id="stage-placeholder">
             <div class="stage-orbit orbit-one"></div><div class="stage-orbit orbit-two"></div>
             <div class="stage-logo"><img class="brand-mark" src="/caemgamo-icon.svg" alt="CAEMGAMO"></div>
@@ -73,7 +74,7 @@
             <div class="stage-people"><span class="stage-avatar me-avatar">V</span><span class="stage-avatar waiting-avatar" id="waiting-avatar">+</span></div>
             <div class="stage-hint" id="stage-hint">Aguardando alguém entrar</div>
           </div>
-          <div class="screen-label" id="screen-label" hidden><span class="screen-live"></span> Tela compartilhada</div>
+          <div class="screen-label" id="screen-label" hidden><span class="screen-live"></span> Sua tela compartilhada</div>
           <video class="local-preview" id="local-video" autoplay muted playsinline hidden></video>
           <div class="call-clock" id="call-clock" hidden>00:00</div>
         </section>

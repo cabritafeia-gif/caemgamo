@@ -1,4 +1,4 @@
-const CACHE = 'caemgamo-shell-v5';
+const CACHE = 'caemgamo-shell-v6';
 const ASSETS = ['/', '/style.css', '/discord.css', '/app.js', '/caemgamo.webmanifest', '/caemgamo-icon.svg', '/logo.svg'];
 self.addEventListener('install', (event) => event.waitUntil((async () => {
   const cache = await caches.open(CACHE);

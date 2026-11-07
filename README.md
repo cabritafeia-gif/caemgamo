@@ -1,6 +1,6 @@
 # CAEMGAMO
 
-Protótipo de aplicativo web para salas privadas de duas pessoas. Inclui mensagens de texto ponto a ponto, chamada de áudio e vídeo e compartilhamento de tela quando o navegador oferece essa função. A interface usa uma navegação escura inspirada em apps de comunidades, com canais e participantes na lateral.
+Aplicativo web para salas privadas com até 15 pessoas. Inclui mensagens de texto ponto a ponto, chamada de áudio e vídeo, compartilhamento de tela quando o navegador oferece essa função e temas claro, escuro e azul-marinho.
 
 Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon.svg](public/caemgamo-icon.svg).
 
@@ -12,7 +12,7 @@ Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon
 4. Acesse `http://localhost:4173`.
 5. Use **Convidar pessoa** para enviar o link da sala.
 
-O app funciona em modo local sem Redis. Cada sala admite duas pessoas e não usa cadastro. `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
+O app funciona em modo local sem Redis e não exige cadastro. Microfone, câmera e compartilhamento podem ser ativados mesmo quando a pessoa está sozinha; o áudio e a tela ficam prontos e são enviados aos participantes quando eles entram. `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
 
 ## Configuração de produção
 
@@ -35,7 +35,8 @@ Para habilitar TURN no Coturn, configure `use-auth-secret` e `static-auth-secret
 
 ## Proteções incluídas
 
-- Salas novas usam tokens aleatórios de 128 bits gerados com Web Crypto. O servidor mantém compatibilidade com códigos antigos.
+- Salas novas usam tokens aleatórios de 128 bits gerados com Web Crypto. Cada sala aceita até 15 participantes e o servidor mantém compatibilidade com códigos antigos.
+- Áudio, câmera, tela e mensagens usam conexões WebRTC diretas entre os navegadores. Com 15 pessoas, cada transmissão é enviada diretamente a cada participante; muitas câmeras ligadas ao mesmo tempo podem exigir bastante banda e processamento. Para chamadas de grupo com qualidade consistente, use um SFU, como LiveKit, em vez da malha direta.
 - O servidor valida a origem do WebSocket, limita conexões, tentativas de entrada e mensagens de sinalização, e rejeita frames acima de 1 MiB.
 - O processo envia heartbeats pelo WebSocket e renova a presença das salas no Redis.
 - O cliente tenta reconectar com espera progressiva; ao voltar, entra novamente na sala e renegocia a conexão.
