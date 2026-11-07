@@ -46,6 +46,19 @@ function showToast(text) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ui.toast.classList.remove('visible'), 3200);
 }
+function showCallFailure(reason, connectionLabel = 'Falha ao entrar · tente novamente') {
+  const detail = String(reason || 'O servidor recusou a entrada na chamada.').slice(0, 320);
+  ui.stage.dataset.callError = detail;
+  ui.stage.classList.add('is-error');
+  ui.stageTitle.textContent = 'Não foi possível conectar';
+  ui.stageSubtitle.textContent = detail;
+  ui.stageHint.textContent = 'A chamada foi encerrada';
+  ui.caption.textContent = detail;
+  $('rejoin-button').hidden = false;
+  $('rejoin-button').textContent = 'Tentar novamente';
+  ui.systemMessage.textContent = `Falha na chamada: ${detail}`;
+  setConnection(connectionLabel, 'error');
+}
 window.CAEMGAMO_TOAST = showToast;
 function setConnection(text, state = '') {
   ui.connectionLabel.textContent = text;
@@ -362,19 +375,20 @@ function updateParticipants() {
     ui.participantList.append(row);
   });
 
-  ui.stageTitle.textContent = !roomJoined ? 'Entre quando quiser' : count > 1 ? `${count} pessoas na sala` : 'Sua sala está pronta';
-  ui.stageSubtitle.textContent = !roomJoined
+  const callError = ui.stage.dataset.callError || '';
+  ui.stageTitle.textContent = callError ? 'Não foi possível conectar' : !roomJoined ? 'Entre quando quiser' : count > 1 ? `${count} pessoas na sala` : 'Sua sala está pronta';
+  ui.stageSubtitle.textContent = callError || (!roomJoined
     ? 'Você está fora da chamada. Entre em um canal de voz quando quiser.'
-    : 'O microfone, a câmera e a tela só são ativados por você.';
-  ui.stageHint.textContent = roomJoined ? `${count} participantes` : 'Fora da chamada';
+    : 'O microfone, a câmera e a tela só são ativados por você.');
+  ui.stageHint.textContent = callError ? 'A chamada foi encerrada' : roomJoined ? `${count} participantes` : 'Fora da chamada';
   ui.waitingAvatar.textContent = roomJoined && count > 1 ? String(count) : '+';
   ui.waitingAvatar.classList.toggle('guest-avatar', roomJoined && count > 1);
-  ui.caption.textContent = participants.size
+  ui.caption.textContent = callError || (participants.size
     ? 'Seus controles de áudio, câmera e tela estão disponíveis.'
-    : 'Nenhum microfone, câmera ou transmissão é ativado antes de você entrar em um canal de voz.';
+    : 'Nenhum microfone, câmera ou transmissão é ativado antes de você entrar em um canal de voz.');
   for (const id of ['mic-button', 'camera-button', 'share-button', 'leave-button']) $(id).disabled = !roomJoined;
   $('rejoin-button').hidden = roomJoined || !intentionalLeave;
-  $('rejoin-button').textContent = everJoinedRoom ? 'Entrar novamente na sala' : 'Entrar na sala';
+  $('rejoin-button').textContent = callError ? 'Tentar novamente' : everJoinedRoom ? 'Entrar novamente na sala' : 'Entrar na sala';
   if (roomJoined) setConnection(`Na sala · ${count} participantes`, 'connected');
   updateStage();
   updateChatState();
@@ -607,9 +621,10 @@ function scheduleIceRestart(peer, immediate = false) {
   if (peer.iceRestarts >= 2 && !peer.relayFallback) enableRelayFallback(peer);
   if (peer.iceRestarts >= 3) {
     peer.ui.status.textContent = 'Não conectou · confira a rede e tente entrar novamente';
-    ui.systemMessage.textContent = hasRelayIceServers()
+    const detail = hasRelayIceServers()
       ? 'A conexão direta e a tentativa pelo relay TURN falharam. Confira a rede e tente sair e entrar novamente.'
       : 'A conexão direta falhou e esta sala não recebeu credenciais TURN. Revise a configuração TURN no servidor e tente novamente.';
+    ui.systemMessage.textContent = detail;
     setConnection('Mídia interrompida · verifique a rede e tente novamente', 'error');
     showToast('A conexão de áudio e vídeo foi interrompida. Saia e entre novamente na sala.');
     return;
@@ -738,6 +753,8 @@ function connect() {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
     if (message.type === 'joined') {
+      delete ui.stage.dataset.callError;
+      ui.stage.classList.remove('is-error');
       clientId = String(message.clientId || '');
       if (Array.isArray(message.iceServers) && message.iceServers.length) iceServers = message.iceServers;
       roomJoined = true;
@@ -772,22 +789,18 @@ function connect() {
       catch (error) { showToast(`Falha ao conectar: ${error.message}`); }
     } else if (message.type === 'error') {
       const reason = String(message.message || 'O servidor recusou a entrada na chamada.');
-      setConnection('Não foi possível entrar', 'error');
-      ui.systemMessage.textContent = `Falha na chamada: ${reason}`;
       showToast(reason);
       if (/sessão expirou|entre na sua conta/i.test(reason)) {
         intentionalLeave = true;
         endCurrentCall();
-        setConnection('Sessão encerrada · entre novamente', 'error');
-        ui.systemMessage.textContent = `A chamada foi encerrada: ${reason}`;
+        showCallFailure(reason, 'Sessão encerrada · entre novamente');
         window.CAEMGAMO_FORCE_REAUTH?.();
         return;
       }
       if (/acesso.*encerrado/i.test(reason)) {
         intentionalLeave = true;
         endCurrentCall();
-        setConnection('Acesso à chamada encerrado', 'error');
-        ui.systemMessage.textContent = `A chamada foi encerrada: ${reason}`;
+        showCallFailure(reason, 'Acesso à chamada encerrado');
         return;
       }
       intentionalLeave = true;
@@ -796,8 +809,7 @@ function connect() {
         updateParticipants();
         socket.close();
       }
-      setConnection('Falha ao entrar · tente novamente', 'error');
-      ui.systemMessage.textContent = `Falha na chamada: ${reason}`;
+      showCallFailure(reason);
     }
   });
   socket.addEventListener('close', () => {
@@ -1082,6 +1094,10 @@ function reconnectToRoom() {
     window.CAEMGAMO_OPEN_ACCOUNT?.();
     return;
   }
+  delete ui.stage.dataset.callError;
+  ui.stage.classList.remove('is-error');
+  ui.stageTitle.textContent = 'Entrando na sala…';
+  ui.stageSubtitle.textContent = 'Conectando aos outros participantes…';
   ensureRoomCode();
   intentionalLeave = false;
   reconnectAttempts = 0;

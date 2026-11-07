@@ -427,6 +427,9 @@ body[data-theme="light"] .preset-avatar-list button{background:#f3f5f9;border-co
   .dm-contacts { border-right:0; border-bottom:1px solid var(--line,rgba(255,255,255,.1)); }
 }
 #friends-dialog { display: block; padding: 0; background: var(--canvas, #313338); }
+.stage.is-error .stage-copy { max-width: min(680px, 90%); padding: 0 12px; text-align: center; }
+.stage.is-error .stage-copy span { color: #ffc1c6; line-height: 1.55; overflow-wrap: anywhere; }
+.stage.is-error .stage-hint { border-color: #f0808c66; color: #ffc1c6; }
 #friends-dialog[hidden] { display: none !important; }
 .app-shell.auth-required .layout,
 .app-shell.auth-required .mobile-tabs { display: none !important; }

@@ -7,6 +7,7 @@ const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
 const community = fs.readFileSync(path.join(root, 'public', 'community-app.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'public', 'discord.css'), 'utf8');
 const socialMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202611070003_caemgamo_social.sql'), 'utf8');
 const socialDbTest = fs.readFileSync(path.join(root, 'supabase', 'tests', 'social_permissions.test.sql'), 'utf8');
 
@@ -63,8 +64,10 @@ test('voice controls expose recovery for blocked playback and ICE reconnection',
   assert.match(app, /setConfiguration\(\{ \.\.\.peer\.pc\.getConfiguration\(\), iceServers, iceTransportPolicy: 'relay' \}\)/);
   assert.match(app, /Tentando conectar áudio e vídeo pelo relay TURN/);
   assert.doesNotMatch(app, /if \(clientId > peer\.id\) return/);
-  assert.match(app, /ui\.systemMessage\.textContent = `Falha na chamada: \$\{reason\}`/);
+  assert.match(app, /ui\.systemMessage\.textContent = `Falha na chamada: \$\{detail\}`/);
   assert.match(app, /peer\.ui\.status\.textContent = 'Não conectou · confira a rede e tente entrar novamente'/);
+  assert.match(app, /function showCallFailure\(reason,[\s\S]*?ui\.stageSubtitle\.textContent = detail[\s\S]*?\$\('rejoin-button'\)\.hidden = false/);
+  assert.match(css, /\.stage\.is-error \.stage-copy span/);
   assert.match(app, /type: 'media-state'/);
   assert.match(app, /data\.type === 'media-state'/);
   assert.match(app, /setAttribute\('aria-pressed', String\(active\)\)/);
