@@ -1,8 +1,9 @@
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const requestedRoom = params.get('sala') || '';
+const requestedChannel = params.get('canal') || '';
 const room = requestedRoom.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64) || randomRoom();
-if (room !== requestedRoom) { params.set('sala', room); history.replaceState({}, '', `${location.pathname}?${params}`); }
+if (room !== requestedRoom) { params.set('sala', room); history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`); }
 
 const ui = {
   layout: document.querySelector('.layout'), connectionDot: $('connection-dot'), connectionLabel: $('connection-label'),
@@ -33,6 +34,7 @@ function showToast(text) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ui.toast.classList.remove('visible'), 3200);
 }
+window.CAEMGAMO_TOAST = showToast;
 function setConnection(text, state = '') {
   ui.connectionLabel.textContent = text;
   ui.connectionDot.className = `live-dot ${state}`;
@@ -47,6 +49,7 @@ function applyTheme(theme, save = true) {
     try { localStorage.setItem('caemgamo-theme', selected); } catch { /* armazenamento indisponível */ }
   }
 }
+window.CAEMGAMO_APPLY_THEME = applyTheme;
 try { applyTheme(localStorage.getItem('caemgamo-theme') || 'dark', false); }
 catch { applyTheme('dark', false); }
 ui.themeSelect.addEventListener('change', () => applyTheme(ui.themeSelect.value));
@@ -90,8 +93,10 @@ function updateParticipants() {
 
 function updateChatState() {
   const available = [...peers.values()].some((peer) => peer.channel?.readyState === 'open');
-  ui.messageInput.disabled = !available;
-  ui.sendButton.disabled = !available || !ui.messageInput.value.trim();
+  const communityChat = window.CaemgamoCommunity?.canSend === true;
+  ui.messageInput.disabled = !available && !communityChat;
+  ui.sendButton.disabled = (!available && !communityChat) || !ui.messageInput.value.trim();
+  for (const id of ['sticker-button', 'record-audio-button']) if ($(id)) $(id).disabled = !communityChat;
 }
 
 function updateStage() {
@@ -248,11 +253,16 @@ function connect() {
   const socket = new WebSocket(`${protocol}//${location.host}/ws`);
   ws = socket;
   setConnection(reconnectAttempts ? 'Reconectando…' : 'Conectando à sala…');
-  socket.addEventListener('open', () => {
+  socket.addEventListener('open', async () => {
     if (socket !== ws || generation !== socketGeneration) return;
     connected = true;
     reconnectAttempts = 0;
-    socket.send(JSON.stringify({ type: 'join', room }));
+    if (requestedChannel) {
+      try { await window.CaemgamoCommunity?.ready; } catch { /* o servidor recusará canais sem autenticação válida */ }
+    }
+    if (socket !== ws || generation !== socketGeneration || socket.readyState !== WebSocket.OPEN) return;
+    const accessToken = await window.CaemgamoCommunity?.getAccessToken?.();
+    socket.send(JSON.stringify({ type: 'join', room, channelId: requestedChannel || '', accessToken: accessToken || '' }));
     setConnection('Entrando na sala…');
   });
   socket.addEventListener('message', async (event) => {
@@ -442,19 +452,34 @@ function stopLocalMedia() {
   updateStage();
 }
 
-function addMessage(text, mine, at = Date.now(), senderId = '') {
+function addMessage(text, mine, at = Date.now(), senderId = '', displayName = '', avatarUrl = '', media = null) {
   const row = document.createElement('div');
   row.className = `message${mine ? ' mine' : ''}`;
+  const avatar = avatarUrl ? document.createElement('img') : document.createElement('span');
+  avatar.className = 'chat-avatar';
+  if (avatarUrl) { avatar.src = avatarUrl; avatar.alt = ''; }
+  else avatar.textContent = mine ? 'V' : 'P';
   const author = document.createElement('span');
   author.className = 'message-author';
-  author.textContent = mine ? 'Você' : `Pessoa ${Math.max(1, [...participants].sort().indexOf(senderId) + 1)}`;
+  author.textContent = mine ? 'Você' : (displayName || `Pessoa ${Math.max(1, [...participants].sort().indexOf(senderId) + 1)}`);
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
-  bubble.textContent = text;
+  if (media?.type === 'audio' && media.url) {
+    const player = document.createElement('audio');
+    player.controls = true;
+    player.preload = 'none';
+    player.src = media.url;
+    player.setAttribute('aria-label', 'Áudio enviado no canal');
+    bubble.append(player);
+    if (text) { const caption = document.createElement('span'); caption.textContent = text; bubble.append(caption); }
+  } else if (media?.type === 'sticker') {
+    bubble.classList.add('sticker-bubble');
+    bubble.textContent = text;
+  } else bubble.textContent = text;
   const time = document.createElement('span');
   time.className = 'message-time';
   time.textContent = new Date(at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  row.append(author, bubble, time);
+  row.append(avatar, author, bubble, time);
   ui.chatBody.append(row);
   ui.chatBody.scrollTop = ui.chatBody.scrollHeight;
   if (!mine && window.matchMedia('(max-width: 820px)').matches && !ui.layout.classList.contains('show-chat')) {
@@ -464,11 +489,25 @@ function addMessage(text, mine, at = Date.now(), senderId = '') {
     badge.textContent = String(unread);
   }
 }
+window.CAEMGAMO_ADD_MESSAGE = addMessage;
+window.CAEMGAMO_UPDATE_CHAT_STATE = updateChatState;
 
-function sendMessage(event) {
+async function sendMessage(event) {
   event.preventDefault();
   const text = ui.messageInput.value.trim();
   if (!text) return;
+  if (window.CaemgamoCommunity?.activeTextChannel) {
+    ui.sendButton.disabled = true;
+    try {
+      await window.CaemgamoCommunity.sendText(text);
+      ui.messageInput.value = '';
+      ui.messageInput.style.height = '33px';
+    } catch (error) {
+      showToast(error.message || 'Não foi possível enviar a mensagem.');
+    }
+    updateChatState();
+    return;
+  }
   const message = JSON.stringify({ type: 'chat', text, at: Date.now() });
   const openChannels = [...peers.values()].map((peer) => peer.channel).filter((channel) => channel?.readyState === 'open');
   if (!openChannels.length) return;
@@ -527,7 +566,9 @@ $('copy-code').addEventListener('click', () => copyText(room, $('copy-code-label
 
 document.querySelectorAll('.mobile-tab').forEach((button) => button.addEventListener('click', () => {
   const chat = button.dataset.tab === 'chat';
+  const communities = button.dataset.tab === 'communities';
   ui.layout.classList.toggle('show-chat', chat);
+  ui.layout.classList.toggle('show-communities', communities);
   document.querySelectorAll('.mobile-tab').forEach((tab) => tab.classList.toggle('selected', tab === button));
   if (chat) { unread = 0; $('unread-count').hidden = true; }
 }));
@@ -548,6 +589,16 @@ ui.installButton.addEventListener('click', async () => {
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+if (requestedChannel) {
+  setInterval(async () => {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    try {
+      await window.CaemgamoCommunity?.ready;
+      const accessToken = await window.CaemgamoCommunity?.getAccessToken?.();
+      if (accessToken && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'voice-auth-refresh', channelId: requestedChannel, accessToken }));
+    } catch { /* reconexão ou renovação da sessão cuidará do próximo ciclo */ }
+  }, 20_000);
 }
 updateParticipants();
 connect();

@@ -16,9 +16,27 @@ const roomManager = new RoomManager({
   getIceServers,
   logger: console
 });
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; connect-src 'self' https: wss:; media-src 'self' https: blob:; font-src 'self' https: data:; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+  'Permissions-Policy': 'microphone=(self), camera=(self), display-capture=(self)'
+};
 
 const server = http.createServer((req, res) => {
   const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  if (pathname === '/config.json') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff'
+    }).end(JSON.stringify({
+      supabaseUrl: process.env.SUPABASE_URL || '',
+      supabaseAnonKey: process.env.SUPABASE_ANON_KEY || ''
+    }));
+    return;
+  }
   if (pathname === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end('{"status":"alive"}');
     return;
@@ -40,7 +58,7 @@ const server = http.createServer((req, res) => {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Não encontrado');
       return;
     }
-    res.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' });
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': mime[path.extname(file)] || 'application/octet-stream' });
     res.end(data);
   });
 });
@@ -186,10 +204,39 @@ async function handleMessage(client, message) {
     if (!takeRate(`join:${client.ip}`, 30, 60_000)) { send(client, { type: 'error', message: 'Muitas tentativas. Aguarde um minuto e tente novamente.' }); return; }
     const roomName = String(message.room || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64);
     if (!roomName) { send(client, { type: 'error', message: 'Código de sala inválido.' }); return; }
+    const channelId = String(message.channelId || '');
+    const uuidRoom = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(roomName);
+    if ((uuidRoom && channelId !== roomName) || (channelId && channelId !== roomName)) {
+      send(client, { type: 'error', message: 'Canal de voz inválido.' });
+      return;
+    }
+    client.voiceChannelId = null;
+    client.voiceAccessToken = '';
+    if (channelId) {
+      const allowed = await canJoinVoiceChannel(channelId, message.accessToken);
+      if (!allowed) {
+        send(client, { type: 'error', message: 'Você precisa entrar na comunidade e ter acesso a este canal de voz.' });
+        return;
+      }
+      client.voiceChannelId = channelId;
+      client.voiceAccessToken = message.accessToken;
+    }
     let result;
     try { result = await roomManager.join(client, roomName); }
     catch (error) { await roomManager.leave(client); throw error; }
     if (result.full) send(client, { type: 'full' });
+    return;
+  }
+  if (message.type === 'voice-auth-refresh' && client.voiceChannelId) {
+    if (!takeRate(`voice-auth-refresh:${client.id}`, 6, 60_000)) { client.socket.destroy(); return; }
+    if (String(message.channelId || '') !== client.voiceChannelId) { client.socket.destroy(); return; }
+    const accessToken = message.accessToken;
+    if (!(await canJoinVoiceChannel(client.voiceChannelId, accessToken))) {
+      send(client, { type: 'error', message: 'Seu acesso ao canal de voz foi encerrado.' });
+      client.socket.destroy();
+      return;
+    }
+    client.voiceAccessToken = accessToken;
     return;
   }
   if (message.type === 'signal' && client.room) {
@@ -202,6 +249,26 @@ async function handleMessage(client, message) {
   }
 }
 
+async function canJoinVoiceChannel(channelId, accessToken) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(channelId) ||
+      typeof accessToken !== 'string' || accessToken.length < 40 || accessToken.length > 8192 ||
+      !process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return false;
+  try {
+    const response = await fetch(`${process.env.SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/can_join_voice_channel`, {
+      method: 'POST',
+      headers: {
+        apikey: process.env.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_channel_id: channelId }),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return false;
+    return (await response.json()) === true;
+  } catch { return false; }
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const client of clients.values()) {
@@ -210,6 +277,16 @@ setInterval(() => {
     client.lastPing = now;
     sendFrame(client, 9);
     roomManager.refresh(client).catch((error) => console.warn('Falha ao renovar participante da sala:', error.message));
+    if (client.voiceChannelId && client.voiceAccessToken) {
+      canJoinVoiceChannel(client.voiceChannelId, client.voiceAccessToken).then((allowed) => {
+        if (!allowed && !client.closed) {
+          send(client, { type: 'error', message: 'Seu acesso ao canal de voz foi encerrado.' });
+          client.socket.destroy();
+        }
+      }).catch(() => {
+        if (!client.closed) client.socket.destroy();
+      });
+    }
   }
   if (rateBuckets.size > 5000) {
     for (const [key, bucket] of rateBuckets) if (now - bucket.startedAt > 120_000) rateBuckets.delete(key);
@@ -221,7 +298,11 @@ async function start() {
   server.listen(PORT, '0.0.0.0', () => console.log(`CAEMGAMO disponível na porta ${PORT}`));
 }
 
-start().catch((error) => {
-  console.error('Não foi possível iniciar o CAEMGAMO:', error.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  start().catch((error) => {
+    console.error('Não foi possível iniciar o CAEMGAMO:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { server, start, canJoinVoiceChannel, originAllowed, takeRate };

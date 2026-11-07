@@ -1,6 +1,6 @@
 # CAEMGAMO
 
-Aplicativo web para salas privadas com até 15 pessoas. Inclui mensagens de texto ponto a ponto, chamada de áudio e vídeo, compartilhamento de tela quando o navegador oferece essa função e temas claro, escuro e azul-marinho.
+Aplicativo web CAEMGAMO para salas privadas com até 15 pessoas. Inclui chamada de áudio e vídeo, compartilhamento de tela quando o navegador oferece essa função e temas claro, escuro e azul-marinho. Com Supabase configurado, inclui contas por e-mail, perfis com avatar, comunidades, canais, convites, mensagens persistentes e controles de moderação.
 
 Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon.svg](public/caemgamo-icon.svg).
 
@@ -10,9 +10,11 @@ Logo vetorial: [logo.svg](public/logo.svg). Ícone do aplicativo: [caemgamo-icon
 2. Abra um terminal nesta pasta e execute `npm install`.
 3. Execute `npm start`.
 4. Acesse `http://localhost:4173`.
-5. Use **Convidar pessoa** para enviar o link da sala.
+5. Use **Convidar pessoa** para enviar o link de uma sala direta.
 
-O app funciona em modo local sem Redis e não exige cadastro. Microfone, câmera e compartilhamento podem ser ativados mesmo quando a pessoa está sozinha; o áudio e a tela ficam prontos e são enviados aos participantes quando eles entram. `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
+Salas diretas funcionam sem Redis e sem cadastro. Microfone, câmera e compartilhamento podem ser ativados mesmo quando a pessoa está sozinha; a transmissão fica pronta para participantes que entrarem depois. Para ativar contas, comunidades e bate-papo persistente, siga [CONFIGURACAO_SUPABASE.md](CONFIGURACAO_SUPABASE.md). `GET /healthz` verifica se o processo está ativo; `GET /readyz` verifica se o serviço consegue aceitar salas.
+
+Os testes locais usam `node --test`. Os testes das políticas Postgres usam `supabase test db` e precisam de Supabase CLI e Docker.
 
 ## Configuração de produção
 
@@ -28,6 +30,8 @@ Configure as variáveis no serviço de hospedagem, usando um gerenciador de segr
 | `TURN_URLS` | Endereços TURN separados por vírgula, como UDP e TLS. |
 | `TURN_SHARED_SECRET` | Segredo compartilhado com o Coturn para emitir credenciais TURN temporárias. Nunca coloque esse segredo no navegador. |
 | `TURN_TTL_SECONDS` | Validade das credenciais TURN, limitada entre 300 e 86.400 segundos; o padrão é 3.600. |
+| `SUPABASE_URL` | URL HTTPS do projeto Supabase. |
+| `SUPABASE_ANON_KEY` | Chave pública Publishable (ou legada `anon`); não use uma chave administrativa. |
 
 O cliente Redis usa Pub/Sub para encaminhar sinalização entre processos e um hash com expiração para registrar participantes. O Pub/Sub não guarda mensagens para assinantes que estavam desconectados; se o servidor ou a região cair, os usuários reconectam e renegociam a chamada. [Documentação do node-redis](https://redis.io/docs/latest/develop/use-cases/pub-sub/nodejs/).
 
@@ -41,7 +45,7 @@ Para habilitar TURN no Coturn, configure `use-auth-secret` e `static-auth-secret
 - O processo envia heartbeats pelo WebSocket e renova a presença das salas no Redis.
 - O cliente tenta reconectar com espera progressiva; ao voltar, entra novamente na sala e renegocia a conexão.
 
-As cotas e limites de frequência são proteções básicas. Em produção, monitore tráfego e ajuste-os para o volume real. O conteúdo de chamadas e mensagens continua sendo enviado entre os navegadores via WebRTC; não há histórico de mensagens no servidor.
+As cotas e limites de frequência são proteções básicas. Em produção, monitore tráfego e ajuste-os para o volume real. Chamadas e mensagens em salas diretas continuam sendo enviadas entre navegadores via WebRTC, sem histórico no servidor. Mensagens de canais Supabase ficam no Postgres e são entregues em tempo real; RLS limita leitura e envio. Figurinhas e clipes curtos de áudio são anexos dos canais de texto.
 
 ## Hospedagem
 

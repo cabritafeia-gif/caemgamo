@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "Salas de conversa com voz, vídeo e compartilhamento de tela",
-  "scripts": { "start": "node server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "test:db": "supabase test db"
+  },
   "dependencies": { "redis": "^5.0.0" }
 }
