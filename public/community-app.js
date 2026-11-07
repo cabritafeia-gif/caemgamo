@@ -111,6 +111,11 @@
 
   function updateAccountView() {
     const signedIn = Boolean(state.session?.user);
+    $('account-dialog').classList.toggle('is-signed-in', signedIn);
+    $('account-title').textContent = signedIn ? 'Conta e configurações' : 'Sua conta CAEMGAMO';
+    $('account-dialog-hint').textContent = signedIn
+      ? 'Gerencie seu perfil, segurança e preferências do CAEMGAMO.'
+      : 'Entre para criar comunidades, salvar mensagens e gerenciar seu perfil.';
     $('auth-forms').hidden = signedIn;
     $('profile-panel').hidden = !signedIn;
     $('profile-button').title = signedIn ? 'Seu perfil' : 'Entrar ou criar conta';

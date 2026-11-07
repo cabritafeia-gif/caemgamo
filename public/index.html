@@ -127,7 +127,7 @@
     <div class="account-dialog">
       <button class="dialog-close" id="account-close" aria-label="Fechar">×</button>
       <h2 id="account-title">Sua conta CAEMGAMO</h2>
-      <p class="dialog-hint">Entre para criar comunidades, salvar mensagens e gerenciar seu perfil.</p>
+      <p class="dialog-hint" id="account-dialog-hint">Entre para criar comunidades, salvar mensagens e gerenciar seu perfil.</p>
       <div id="auth-config-warning" class="dialog-warning" hidden></div>
       <div id="auth-forms">
         <form id="sign-in-form" class="account-form">
@@ -163,19 +163,27 @@
       </div>
       <div id="profile-panel" hidden>
           <nav class="account-settings-nav" id="account-settings-nav" aria-label="Configurações da conta">
-            <button type="button" data-settings-tab="account" aria-current="page">Conta</button>
-            <button type="button" data-settings-tab="profile">Perfil</button>
-            <button type="button" data-settings-tab="security">Segurança</button>
-            <button type="button" data-settings-tab="privacy">Privacidade</button>
-            <button type="button" data-settings-tab="notifications">Notificações</button>
-            <button type="button" data-settings-tab="voice">Voz e vídeo</button>
-            <button type="button" data-settings-tab="devices">Dispositivos</button>
-            <button type="button" data-settings-tab="appearance">Aparência</button>
+            <div class="account-nav-group">
+              <span class="account-nav-heading">Minha conta</span>
+              <button type="button" data-settings-tab="account" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20a7 7 0 0 1 14 0"></path></svg><span>Conta</span></button>
+              <button type="button" data-settings-tab="profile"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="4"></rect><circle cx="9" cy="10" r="2.2"></circle><path d="M5.8 17a3.7 3.7 0 0 1 6.4 0M15 9h3M15 13h3"></path></svg><span>Perfil</span></button>
+              <button type="button" data-settings-tab="security"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6z"></path><path d="m9 12 2 2 4-4"></path></svg><span>Segurança</span></button>
+              <button type="button" data-settings-tab="privacy"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg><span>Privacidade</span></button>
+            </div>
+            <div class="account-nav-group">
+              <span class="account-nav-heading">Preferências</span>
+              <button type="button" data-settings-tab="notifications"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span>Notificações</span></button>
+              <button type="button" data-settings-tab="voice"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v18M8 7v10M4 10v4M16 7v10M20 10v4"></path></svg><span>Voz e vídeo</span></button>
+              <button type="button" data-settings-tab="devices"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"></rect><path d="M8 21h8M12 17v4M17 7h2"></path></svg><span>Dispositivos</span></button>
+              <button type="button" data-settings-tab="appearance"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1.2a2 2 0 0 0 1.3-3.5 1.8 1.8 0 0 1 1.2-3.2H18a3 3 0 0 0 3-3c0-4.6-4-8.3-9-8.3Z"></path><path d="M7.5 10h.1M10.5 7h.1M15 7.5h.1"></path></svg><span>Aparência</span></button>
+            </div>
           </nav>
-          <section class="account-settings-section" data-settings-section="account">
+          <div class="account-settings-content">
+            <div class="account-settings-heading"><div><span class="account-settings-eyebrow">CAEMGAMO · CONFIGURAÇÕES</span><h3>Gerencie sua conta</h3><p>Informações e preferências pessoais.</p></div></div>
+            <section class="account-settings-section" data-settings-section="account">
             <h3>Conta</h3>
-            <p class="settings-summary">E-mail: <strong id="account-email">—</strong></p>
-            <button class="link-action danger-action" id="sign-out-button" type="button">Sair da conta</button>
+            <div class="account-email-card"><span class="account-detail-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"></rect><path d="m4 7 8 6 8-6"></path></svg></span><div><span class="account-detail-label">E-mail conectado</span><strong id="account-email">—</strong></div></div>
+            <button class="link-action danger-action" id="sign-out-button" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3"></path><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"></path></svg><span>Sair da conta</span></button>
           </section>
           <section class="account-settings-section" data-settings-section="security" hidden>
             <h3>Segurança</h3>
@@ -220,6 +228,7 @@
             <h3>Aparência</h3>
             <label>Tema<select id="settings-theme-select"><option value="light">Claro</option><option value="dark">Escuro</option><option value="navy">Azul-marinho</option></select></label>
           </section>
+          </div>
         </div>
       </div>
       <p class="account-status" id="account-status" role="status" aria-live="polite"></p>
